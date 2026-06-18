@@ -1,0 +1,24 @@
+# Keil MDK-ARM build outputs
+MDK-ARM/Listings/
+MDK-ARM/Objects/
+*.o
+*.d
+*.crf
+*.dep
+*.axf
+*.hex
+*.bin
+*.map
+*.lst
+*.lnp
+*.htm
+*.bak
+*.iex
+*.sct
+*.scvd
+*.jlink
+
+# User-specific IDE settings
+*.uvguix.*
+*.uvoptx
+
