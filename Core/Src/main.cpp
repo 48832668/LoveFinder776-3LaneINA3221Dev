@@ -19,6 +19,9 @@
 
 #include <cstdio>
 
+// 200ms tick from TIM3 (declared in tim.c)
+extern volatile uint8_t tim3_tick_flag;
+
 /*============================================================================
  * Constants
  *============================================================================*/
@@ -36,14 +39,15 @@ namespace Display {
     constexpr uint8_t COL3_X = 113;  // CH3
     constexpr uint8_t COL_W  = 48;   // column width
 
-    // Row Y positions (vertically centered in 80px)
-    constexpr uint8_t LABEL_Y   = 7;     // Font_11x18: IN/OUT badge
-    constexpr uint8_t VOLTAGE_Y = 27;    // Font_11x18: voltage
-    constexpr uint8_t CURRENT_Y = 52;    // Font_11x18: current
+    // Row Y positions (shifted +4px to make room for status bar at Y=0)
+    constexpr uint8_t STATUS_Y   = 0;     // Font_7x10: power & charge
+    constexpr uint8_t LABEL_Y   = 11;     // Font_11x18: IN/OUT badge (was 7)
+    constexpr uint8_t VOLTAGE_Y = 31;    // Font_11x18: voltage (was 27)
+    constexpr uint8_t CURRENT_Y = 56;    // Font_11x18: current (was 52)
 
     // Progress bar positions (just below each value)
-    constexpr uint8_t V_BAR_Y   = VOLTAGE_Y + 18 + 1;  // 46
-    constexpr uint8_t A_BAR_Y   = CURRENT_Y + 18 + 1;  // 71
+    constexpr uint8_t V_BAR_Y   = VOLTAGE_Y + 18 + 1;  // 50 (was 46)
+    constexpr uint8_t A_BAR_Y   = CURRENT_Y + 18 + 1;  // 75 (was 71)
 
     // Progress bar dimensions
     constexpr uint8_t BAR_W     = 42;    // bar width (matching reference)
@@ -73,6 +77,82 @@ constexpr uint8_t COL_X[3] = {
 };
 
 /*============================================================================
+ * Color Gradient Helpers
+ *============================================================================*/
+
+// Linear interpolate between two RGB565 colors in 5/6/5 space
+// t: 0-255, t=0 → c1, t=255 → c2
+static uint16_t lerpColor565(uint16_t c1, uint16_t c2, uint8_t t) {
+    uint8_t r1 = (c1 >> 11) & 0x1F;
+    uint8_t g1 = (c1 >> 5)  & 0x3F;
+    uint8_t b1 =  c1        & 0x1F;
+    uint8_t r2 = (c2 >> 11) & 0x1F;
+    uint8_t g2 = (c2 >> 5)  & 0x3F;
+    uint8_t b2 =  c2        & 0x1F;
+
+    uint8_t r = r1 + ((static_cast<uint16_t>(r2 - r1) * t) >> 8);
+    uint8_t g = g1 + ((static_cast<uint16_t>(g2 - g1) * t) >> 8);
+    uint8_t b = b1 + ((static_cast<uint16_t>(b2 - b1) * t) >> 8);
+
+    return (static_cast<uint16_t>(r) << 11) | (static_cast<uint16_t>(g) << 5) | b;
+}
+
+// Voltage color: green(0V) → yellow(5V) → orange(12V) → red(26V)
+static uint16_t voltageColor(uint16_t mv) {
+    if (mv < 5000) {
+        uint8_t t = (mv * 255) / 5000;          // 0→5V: GREEN → YELLOW
+        return lerpColor565(ST7735_Color::GREEN, ST7735_Color::YELLOW, t);
+    } else if (mv < 12000) {
+        uint8_t t = ((mv - 5000) * 255) / 7000; // 5→12V: YELLOW → ORANGE
+        return lerpColor565(ST7735_Color::YELLOW, ST7735_Color::ORANGE, t);
+    } else {
+        uint8_t t = ((mv - 12000) * 255) / 14000; // 12→26V: ORANGE → RED
+        if (t > 255) t = 255;
+        return lerpColor565(ST7735_Color::ORANGE, ST7735_Color::RED, t);
+    }
+}
+
+// Current color: directional palettes
+// OUT: dim cyan(0A) → bright cyan → bright blue(10A)
+// IN : warm yellow(0A) → orange → RED(10A)
+static uint16_t currentColor(int32_t mA, bool isIn) {
+    uint32_t abs_mA = (mA >= 0) ? static_cast<uint32_t>(mA) : static_cast<uint32_t>(-mA);
+    if (abs_mA > 10000) abs_mA = 10000;
+    uint8_t t = (abs_mA * 255) / 10000;
+
+    if (isIn) {
+        // IN: dim warm yellow → orange → red
+        constexpr uint16_t DIM_WARM = ST7735_Color::RGB565(180, 120, 0);   // low current IN
+        if (abs_mA < 5000) {
+            uint8_t t2 = (abs_mA * 255) / 5000;
+            return lerpColor565(DIM_WARM, ST7735_Color::ORANGE, t2);
+        } else {
+            uint8_t t2 = ((abs_mA - 5000) * 255) / 5000;
+            return lerpColor565(ST7735_Color::ORANGE, ST7735_Color::RED, t2);
+        }
+    } else {
+        // OUT: dim cyan → bright cyan → blue
+        constexpr uint16_t DIM_CYAN = ST7735_Color::RGB565(60, 160, 180);  // low current OUT
+        if (abs_mA < 5000) {
+            uint8_t t2 = (abs_mA * 255) / 5000;
+            return lerpColor565(DIM_CYAN, ST7735_Color::CYAN, t2);
+        } else {
+            uint8_t t2 = ((abs_mA - 5000) * 255) / 5000;
+            return lerpColor565(ST7735_Color::CYAN, ST7735_Color::BRIGHT_BLUE, t2);
+        }
+    }
+}
+
+// Bar fill color uses the same gradient as text color
+static uint16_t voltageBarColor(uint16_t mv) {
+    return voltageColor(mv);
+}
+
+static uint16_t currentBarColor(int32_t mA, bool isIn) {
+    return currentColor(mA, isIn);
+}
+
+/*============================================================================
  * Global Variables
  *============================================================================*/
 
@@ -85,9 +165,18 @@ ST7735 lcd;
 static uint16_t prevVoltage_mV[3] = {0xFFFF, 0xFFFF, 0xFFFF};
 static int32_t  prevCurrent_mA[3] = {0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF};
 static int8_t   prevDirection[3] = {0, 0, 0};  // 0=init, 1=OUT, -1=IN
+static bool     prevIsIn[3] = {false, false, false};  // for IN centering switch
+static uint8_t  prevVBarW[3] = {0xFF, 0xFF, 0xFF};    // previous bar widths
+static uint8_t  prevABarW[3] = {0xFF, 0xFF, 0xFF};
 
 // Animation state for idle bars
 static uint8_t animCounter = 0;
+
+// Power & charge accumulation (only count IN direction)
+static uint32_t charge_mAs = 0;           // accumulated millianp-seconds
+static uint16_t chargeFraction = 0;       // sub-mAs fraction (0.1 mAs units), avoids ÷5 rounding loss
+static uint16_t prevPowerW_display = 0xFFFF;   // for dirty detect: W*10
+static uint32_t prevCharge_mAh = 0xFFFFFFFF;   // for dirty detect
 
 /*============================================================================
  * Function Prototypes
@@ -129,6 +218,9 @@ void DisplayInit(void)
 {
     lcd.fillScreen(ST7735_Color::BLACK);
 
+    // Clear status bar area (top 10px)
+    lcd.fillRectangleFast(0, Display::STATUS_Y, 160, 10, ST7735_Color::BLACK);
+
     // Draw SLATE rounded badge for "IN"/"OUT" row (all 3 columns)
     for (int i = 0; i < 3; i++) {
         drawBadgeBg(COL_X[i] - 2, Display::LABEL_BG_Y,
@@ -147,6 +239,13 @@ void DisplayInit(void)
     prevVoltage_mV[0] = prevVoltage_mV[1] = prevVoltage_mV[2] = 0xFFFF;
     prevCurrent_mA[0] = prevCurrent_mA[1] = prevCurrent_mA[2] = 0x7FFFFFFF;
     prevDirection[0] = prevDirection[1] = prevDirection[2] = 0;
+    prevIsIn[0] = prevIsIn[1] = prevIsIn[2] = false;
+    prevVBarW[0] = prevVBarW[1] = prevVBarW[2] = 0xFF;
+    prevABarW[0] = prevABarW[1] = prevABarW[2] = 0xFF;
+    prevPowerW_display = 0xFFFF;
+    prevCharge_mAh = 0xFFFFFFFF;
+    charge_mAs = 0;
+    chargeFraction = 0;
 }
 
 void UpdateDisplay(const INA3221_ChannelData data[3])
@@ -158,9 +257,62 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
 
     uint8_t animPos;
     if (animCounter <= Display::MAX_POS) {
-        animPos = animCounter;                    // Moving right: 0 → MAX_POS
+        animPos = animCounter;
     } else {
-        animPos = Display::ANIM_FRAMES - animCounter;  // Moving left: MAX_POS → 0
+        animPos = Display::ANIM_FRAMES - animCounter;
+    }
+
+    // --- Calculate total power & accumulate charge (OUT direction only) ---
+    {
+        uint32_t totalW_x10 = 0;  // W * 10, e.g. 1145 = 114.5W
+
+        for (int i = 0; i < 3; i++) {
+            const INA3221_ChannelData& ch = data[2 - i];
+            const INA3221_Direction dir = INA3221::getDirection(ch.shuntVoltage_uV);
+            if (dir == INA3221_Direction::IN) {
+                // power = V * |I| / 1000 (mW)
+                uint32_t abs_mA = (ch.current_mA >= 0) ? static_cast<uint32_t>(ch.current_mA)
+                                                        : static_cast<uint32_t>(-ch.current_mA);
+                totalW_x10 += (static_cast<uint32_t>(ch.busVoltage_mV) * abs_mA) / 100000;
+
+                // charge: fractional accumulator avoids integer rounding loss
+                // 200ms per tick → abs_mA * 200 = mAs in 0.1 mAs resolution
+                chargeFraction += static_cast<uint16_t>(abs_mA * 2u);
+                while (chargeFraction >= 10u) {
+                    charge_mAs += 1;
+                    chargeFraction -= 10u;
+                }
+            }
+        }
+
+        // Clamp totalW_x10 to 9999 (999.9W max display)
+        if (totalW_x10 > 9999) totalW_x10 = 9999;
+        // Clamp charge to prevent uint32_t overflow (~49 days at 10A on 1 channel)
+        if (charge_mAs > 4280000000UL) charge_mAs = 4280000000UL;
+
+        // --- Status Bar: Top line (Font_7x10) ---
+        // Power format: WWW.YW (6 chars, 42px)
+        {
+            uint16_t w_int  = static_cast<uint16_t>(totalW_x10 / 10);
+            uint8_t  w_dec  = static_cast<uint8_t>(totalW_x10 % 10);
+            if (w_int != prevPowerW_display) {
+                snprintf(buf, sizeof(buf), "%3u.%uW", w_int, w_dec);
+                lcd.writeString(0, Display::STATUS_Y, buf, Font_7x10,
+                                ST7735_Color::WHITE, ST7735_Color::BLACK);
+                prevPowerW_display = w_int;
+            }
+        }
+
+        // Charge format: XXXXXmAh (up to 7 chars, fits in remaining space)
+        {
+            uint32_t mAh = charge_mAs / 3600;
+            if (mAh != prevCharge_mAh) {
+                snprintf(buf, sizeof(buf), "%05umAh", mAh);
+                lcd.writeString(104, Display::STATUS_Y, buf, Font_7x10,
+                                ST7735_Color::RGB565(180, 220, 100), ST7735_Color::BLACK);
+                prevCharge_mAh = mAh;
+            }
+        }
     }
 
     for (int i = 0; i < 3; i++)
@@ -169,90 +321,112 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
         const INA3221_ChannelData& ch = data[2 - i];  // display order: CH3, CH2, CH1
         const uint16_t v_mV = ch.busVoltage_mV;
         const int32_t  i_mA = ch.current_mA;
+        const INA3221_Direction dir = INA3221::getDirection(ch.shuntVoltage_uV);
+        const bool isIn = (dir == INA3221_Direction::IN);
+        const int8_t dirVal = static_cast<int8_t>(dir);
 
-        // --- IN/OUT Badge (Font_11x18, based on current direction) ---
+        // --- IN/OUT Badge (Font_11x18, stable directional colors) ---
+        if (dirVal != prevDirection[i])
         {
-            // Positive current = flowing OUT to load (bus → load)
-            // Negative current = flowing IN from source (source → bus)
-            const bool isIn = (i_mA < 0);
-            const int8_t dir = isIn ? 1 : -1;
+            const char* label = isIn ? "IN " : "OUT";
+            uint16_t badgeColor = isIn ? ST7735_Color::RGB565(230, 140, 30)
+                                       : ST7735_Color::CYAN;
 
-            if (dir != prevDirection[i])
-            {
-                // Centered in 48px badge: "IN " = 33px, left pad = (48-33)/2 ≈ 7
-                // "OUT" = 33px, same pad = 7
-                const char* label = isIn ? "IN " : "OUT";
-                uint16_t color = isIn ? ST7735_Color::YELLOW : ST7735_Color::CYAN;
-                lcd.writeString(colX + 7, Display::LABEL_Y,
-                                label, Font_11x18,
-                                color, ST7735_Color::SLATE);
-                prevDirection[i] = dir;
-            }
+            // Center "IN " or "OUT" (both 33px) in 48px badge
+            lcd.writeString(colX + 7, Display::LABEL_Y,
+                            label, Font_11x18,
+                            badgeColor, ST7735_Color::SLATE);
+            prevDirection[i] = dirVal;
         }
 
-        // --- Bus Voltage (Font_11x18, CYAN) ---
+        // --- Bus Voltage (Font_11x18, gradient color) ---
         if (v_mV != prevVoltage_mV[i])
         {
             uint16_t v = v_mV / 1000;
             uint16_t d = (v_mV % 1000) / 100;
             snprintf(buf, sizeof(buf), "%02d.%d", v, d);
+            uint16_t vColor = voltageColor(v_mV);
             lcd.writeString(colX, Display::VOLTAGE_Y,
                             buf, Font_11x18,
-                            ST7735_Color::CYAN, ST7735_Color::BLACK);
+                            vColor, ST7735_Color::BLACK);
             prevVoltage_mV[i] = v_mV;
         }
 
-        // --- Voltage Progress Bar (always redrawn for animation) ---
+        // --- Voltage Progress Bar (dirty-rect: only refill when width changes or idle) ---
         {
             uint8_t w = (static_cast<uint32_t>(v_mV) * Display::BAR_W) / Display::V_MAX_mV;
             if (w > Display::BAR_W) w = Display::BAR_W;
 
-            lcd.fillRectangleFast(colX, Display::V_BAR_Y,
-                                  Display::BAR_W, Display::BAR_H, ST7735_Color::GUNMETAL);
+            const bool vIdle = (v_mV < 1000);
 
-            if (v_mV < 1000) {
-                // Idle: animated slider
-                lcd.fillRectangleFast(colX + animPos, Display::V_BAR_Y,
-                                      Display::SEG_WIDTH, Display::BAR_H, ST7735_Color::CYAN);
-            } else if (w > 0) {
-                // Active: proportional bar
+            if (vIdle || w != prevVBarW[i]) {
                 lcd.fillRectangleFast(colX, Display::V_BAR_Y,
-                                      w, Display::BAR_H, ST7735_Color::CYAN);
+                                      Display::BAR_W, Display::BAR_H, ST7735_Color::GUNMETAL);
+                if (vIdle) {
+                    lcd.fillRectangleFast(colX + animPos, Display::V_BAR_Y,
+                                          Display::SEG_WIDTH, Display::BAR_H,
+                                          voltageBarColor(v_mV));
+                } else if (w > 0) {
+                    lcd.fillRectangleFast(colX, Display::V_BAR_Y,
+                                          w, Display::BAR_H,
+                                          voltageBarColor(v_mV));
+                }
+                prevVBarW[i] = w;
+            } else if (w > 0 && w == prevVBarW[i] && v_mV >= 1000) {
+                // Width unchanged and active — no redraw needed
             }
         }
 
-        // --- Current (Font_11x18, YELLOW) ---
-        if (i_mA != prevCurrent_mA[i])
+        // --- Current (Font_11x18, gradient color, IN centered) ---
+        if (i_mA != prevCurrent_mA[i] || isIn != prevIsIn[i])
         {
             uint32_t abs_mA = (i_mA >= 0) ? static_cast<uint32_t>(i_mA) : static_cast<uint32_t>(-i_mA);
             int a = abs_mA / 1000;
             int d1 = (abs_mA % 1000) / 100;
             int d2 = (abs_mA % 100) / 10;
             snprintf(buf, sizeof(buf), "%d.%d%d", a, d1, d2);
-            lcd.writeString(colX, Display::CURRENT_Y,
+
+            uint16_t cColor = currentColor(i_mA, isIn);
+
+            // IN mode: center text in column (makes visual distinction)
+            uint8_t curX = colX;
+            if (isIn) {
+                // 4 chars = 44px, 5 chars = 55px; column = 48px
+                uint8_t charCount = (abs_mA >= 10000) ? 5 : 4;
+                int16_t textW = static_cast<int16_t>(charCount) * 11;
+                int16_t pad = (static_cast<int16_t>(Display::COL_W) - textW) / 2;
+                if (pad > 0) curX = colX + static_cast<uint8_t>(pad);
+            }
+
+            lcd.writeString(curX, Display::CURRENT_Y,
                             buf, Font_11x18,
-                            ST7735_Color::YELLOW, ST7735_Color::BLACK);
+                            cColor, ST7735_Color::BLACK);
             prevCurrent_mA[i] = i_mA;
+            prevIsIn[i] = isIn;
         }
 
-        // --- Current Progress Bar (always redrawn for animation) ---
+        // --- Current Progress Bar (dirty-rect: only refill when width changes or idle) ---
         {
-            uint8_t w = (i_mA > 0) ? (static_cast<uint32_t>(i_mA) * Display::BAR_W) / Display::A_MAX_mA : 0;
+            uint32_t abs_mA = (i_mA >= 0) ? static_cast<uint32_t>(i_mA) : static_cast<uint32_t>(-i_mA);
+            uint8_t w = (abs_mA * Display::BAR_W) / Display::A_MAX_mA;
             if (w > Display::BAR_W) w = Display::BAR_W;
 
-            const bool idle = (i_mA <= 0 || v_mV < 1000);
+            const bool idle = (v_mV < 1000);
 
-            lcd.fillRectangleFast(colX, Display::A_BAR_Y,
-                                  Display::BAR_W, Display::BAR_H, ST7735_Color::GUNMETAL);
-
-            if (idle) {
-                // Idle: animated slider
-                lcd.fillRectangleFast(colX + animPos, Display::A_BAR_Y,
-                                      Display::SEG_WIDTH, Display::BAR_H, ST7735_Color::YELLOW);
-            } else if (w > 0) {
-                // Active: proportional bar
+            if (idle || w != prevABarW[i]) {
                 lcd.fillRectangleFast(colX, Display::A_BAR_Y,
-                                      w, Display::BAR_H, ST7735_Color::YELLOW);
+                                      Display::BAR_W, Display::BAR_H, ST7735_Color::GUNMETAL);
+
+                if (idle) {
+                    lcd.fillRectangleFast(colX + animPos, Display::A_BAR_Y,
+                                          Display::SEG_WIDTH, Display::BAR_H,
+                                          currentBarColor(i_mA, isIn));
+                } else if (w > 0) {
+                    lcd.fillRectangleFast(colX, Display::A_BAR_Y,
+                                          w, Display::BAR_H,
+                                          currentBarColor(i_mA, isIn));
+                }
+                prevABarW[i] = w;
             }
         }
     }
@@ -299,6 +473,13 @@ int main(void)
         while (1) { HAL_Delay(1000); }
     }
 
+    // Per-channel IN+/IN- direction correction:
+    // CH1, CH2: normal (IN+ = bus side, IN- = load side)
+    // CH3:      reversed (pins swapped on PCB, negate shunt voltage)
+    ina3221.setChannelDirectionReversed(1, false);  // normal
+    ina3221.setChannelDirectionReversed(2, false);  // normal
+    ina3221.setChannelDirectionReversed(3, true);   // reversed
+
     // Initialize Button (KEY1 on PA1, active low)
     BUTTON_Config btnConfig = BUTTON_Config::getDefault();
     Button keyButton(KEY1_GPIO_Port, KEY1_Pin, btnConfig);
@@ -306,12 +487,14 @@ int main(void)
     // Initialize display layout
     DisplayInit();
 
-    // Show INA3221 found status briefly
-    lcd.writeString(15, 68, "INA3221 Ready", Font_7x10,
+    // Show INA3221 found status on status bar briefly, then clear
+    lcd.writeString(0, 0, "INA3221 Ready", Font_7x10,
                     ST7735_Color::GREEN, ST7735_Color::BLACK);
-    HAL_Delay(500);
-    // Clear status line
-    lcd.fillRectangle(0, 68, 160, 10, ST7735_Color::BLACK);
+    HAL_Delay(800);
+    lcd.fillRectangleFast(0, 0, 160, 10, ST7735_Color::BLACK);
+
+    // Start TIM3 for 200ms periodic tick
+    HAL_TIM_Base_Start_IT(&htim3);
 
     // Measurement data
     INA3221_ChannelData channelData[3];
@@ -319,38 +502,43 @@ int main(void)
 
 while (1)
 {
-    // Read all 3 channels
-    ina3221.readAllChannels(channelData);
-
-    // Update display (change detection only)
-    UpdateDisplay(channelData);
-
-    // Check button (re-scan I2C bus if pressed)
-    keyButton.update();
-    if (keyButton.getEvent() != e_BUTTON_Event::NONE)
+    // Wait for TIM3 tick (non-blocking)
+    if (tim3_tick_flag)
     {
-        // I2C re-scan placeholder - show device list briefly
-        lcd.fillScreen(ST7735_Color::BLACK);
-        lcd.writeString(30, 0, "I2C Devices", Font_7x10,
-                        ST7735_Color::CYAN, ST7735_Color::BLACK);
+        tim3_tick_flag = 0;
 
-        uint8_t devices[16];
-        uint8_t count = i2cDriver.scan(devices, sizeof(devices));
-        uint8_t y = 14;
-        for (uint8_t j = 0; j < count; j++)
+        // Read all 3 channels
+        ina3221.readAllChannels(channelData);
+
+        // Update display (change detection only)
+        UpdateDisplay(channelData);
+
+        // Check button (re-scan I2C bus if pressed)
+        keyButton.update();
+        if (keyButton.getEvent() != e_BUTTON_Event::NONE)
         {
-            snprintf(mainBuf, sizeof(mainBuf), "0x%02X", devices[j]);
-            lcd.writeString(5, y, mainBuf, Font_7x10,
-                            ST7735_Color::WHITE, ST7735_Color::BLACK);
-            y += 12;
+            // I2C re-scan placeholder - show device list briefly
+            lcd.fillScreen(ST7735_Color::BLACK);
+            lcd.writeString(30, 0, "I2C Devices", Font_7x10,
+                            ST7735_Color::CYAN, ST7735_Color::BLACK);
+
+            uint8_t devices[16];
+            uint8_t count = i2cDriver.scan(devices, sizeof(devices));
+            uint8_t y = 14;
+            for (uint8_t j = 0; j < count; j++)
+            {
+                snprintf(mainBuf, sizeof(mainBuf), "0x%02X", devices[j]);
+                lcd.writeString(5, y, mainBuf, Font_7x10,
+                                ST7735_Color::WHITE, ST7735_Color::BLACK);
+                y += 12;
+            }
+            HAL_Delay(2000);
+
+            // Restore display & reinitialize charge
+            DisplayInit();
+            HAL_TIM_Base_Start_IT(&htim3);  // re-start if stopped
         }
-        HAL_Delay(2000);
-
-        // Restore display
-        DisplayInit();
     }
-
-    HAL_Delay(200);  // 5 Hz update rate
 }
 }
 

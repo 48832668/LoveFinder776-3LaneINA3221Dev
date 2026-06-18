@@ -97,6 +97,7 @@ uint16_t INA3221::readBusVoltage(uint8_t channel)
 int16_t INA3221::readShuntVoltage(uint8_t channel)
 {
     if (m_i2c == nullptr) return 0;
+    if (channel < 1 || channel > 3) return 0;
 
     uint8_t reg = getShuntReg(channel);
     uint8_t buf[2] = {0, 0};
@@ -110,41 +111,61 @@ int16_t INA3221::readShuntVoltage(uint8_t channel)
         return 0;
 
     uint16_t raw = (static_cast<uint16_t>(buf[0]) << 8) | buf[1];
-    int16_t signedRaw = static_cast<int16_t>(raw);
-    return (signedRaw >> 3) * 40;
+    int16_t shunt_uV = (static_cast<int16_t>(raw) >> 3) * 40;
+
+    return shunt_uV;
 }
 
 INA3221_ChannelData INA3221::readChannel(uint8_t channel)
 {
     INA3221_ChannelData data = {0, 0, 0};
     if (m_i2c == nullptr) return data;
+    if (channel < 1 || channel > 3) return data;
 
-    uint8_t busReg = getBusReg(channel);
-    uint8_t shuntReg = getShuntReg(channel);
+    uint8_t reg = getBusReg(channel);
     uint8_t buf[2];
 
     // Read bus voltage
-    buf[0] = busReg;
+    buf[0] = reg;
     if (HAL_I2C_Master_Transmit(m_i2c, m_addr << 1, buf, 1, 100) != HAL_OK) return data;
     if (HAL_I2C_Master_Receive(m_i2c, m_addr << 1, buf, 2, 100) != HAL_OK) return data;
     uint16_t busRaw = (static_cast<uint16_t>(buf[0]) << 8) | buf[1];
     data.busVoltage_mV = (busRaw >> 3) * 8;
 
-    // Read shunt voltage
-    buf[0] = shuntReg;
-    if (HAL_I2C_Master_Transmit(m_i2c, m_addr << 1, buf, 1, 100) != HAL_OK) return data;
-    if (HAL_I2C_Master_Receive(m_i2c, m_addr << 1, buf, 2, 100) != HAL_OK) return data;
-    uint16_t shuntRaw = (static_cast<uint16_t>(buf[0]) << 8) | buf[1];
-    int16_t signedShunt = static_cast<int16_t>(shuntRaw);
-    data.shuntVoltage_uV = (signedShunt >> 3) * 40;
+    // Read shunt voltage (raw, no reversal applied yet)
+    data.shuntVoltage_uV = readShuntVoltage(channel);
 
-    // Current = shunt voltage / shunt resistance
+    // Apply per-channel IN+/IN- swap correction for current calculation only
+    int16_t correctedShunt = data.shuntVoltage_uV;
+    if (m_reverseDir[channel - 1]) {
+        correctedShunt = -correctedShunt;
+    }
+
+    // Current = corrected shunt voltage / shunt resistance
     if (m_shuntOhm > 0.0001f) {
-        float currentA = static_cast<float>(data.shuntVoltage_uV) / 1000000.0f / m_shuntOhm;
+        float currentA = static_cast<float>(correctedShunt) / 1000000.0f / m_shuntOhm;
         data.current_mA = static_cast<int32_t>(currentA * 1000.0f);
     }
 
     return data;
+}
+
+void INA3221::setChannelDirectionReversed(uint8_t channel, bool reversed)
+{
+    if (channel < 1 || channel > 3) return;
+    m_reverseDir[channel - 1] = reversed;
+}
+
+bool INA3221::isChannelDirectionReversed(uint8_t channel) const
+{
+    if (channel < 1 || channel > 3) return false;
+    return m_reverseDir[channel - 1];
+}
+
+INA3221_Direction INA3221::getChannelDirection(uint8_t channel)
+{
+    int16_t shunt = readShuntVoltage(channel);
+    return getDirection(shunt);
 }
 
 void INA3221::readAllChannels(INA3221_ChannelData data[3])
@@ -203,6 +224,11 @@ int16_t s16_INA3221_ReadShuntVoltage(INA3221* dev, uint8_t channel)
 void v_INA3221_ReadAllChannels(INA3221* dev, INA3221_ChannelData data[3])
 {
     dev->readAllChannels(data);
+}
+
+INA3221_Direction e_INA3221_GetChannelDirection(INA3221* dev, uint8_t channel)
+{
+    return dev->getChannelDirection(channel);
 }
 
 } // extern "C"

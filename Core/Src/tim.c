@@ -22,6 +22,9 @@
 
 /* USER CODE BEGIN 0 */
 
+// 200ms tick flag for main loop (declared extern in main.cpp)
+volatile uint8_t tim3_tick_flag = 0;
+
 /* USER CODE END 0 */
 
 TIM_HandleTypeDef htim3;
@@ -43,7 +46,7 @@ void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 6400-1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 10000-1;
+  htim3.Init.Period = 2000-1;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -116,7 +119,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 {
     if (htim->Instance == TIM3)
     {
-        // Toggle LED1 if blinking is enabled
+        tim3_tick_flag = 1;  // signal main loop to sample & update
+
+        // Toggle LED1 as heartbeat (200ms blink = alive indicator)
         if (led1_blink_enabled != 0)
         {
             HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);

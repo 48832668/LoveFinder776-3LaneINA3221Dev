@@ -80,6 +80,21 @@ namespace INA3221Config {
 }
 
 /*============================================================================
+ * Direction Enumeration
+ *============================================================================*/
+
+/**
+ * @brief Current flow direction relative to the INA3221
+ *
+ * OUT: Shunt voltage >= 0, current flows from bus to load (load consuming)
+ * IN:  Shunt voltage < 0,  current flows from load to bus (source feeding)
+ */
+enum class INA3221_Direction : int8_t {
+    OUT = 1,   // Positive/zero shunt voltage → current flowing OUT to load
+    IN  = -1   // Negative shunt voltage   → current flowing IN from source
+};
+
+/*============================================================================
  * Channel Data Structure
  *============================================================================*/
 
@@ -161,6 +176,48 @@ public:
     void setShuntResistor(float shuntOhm) { m_shuntOhm = shuntOhm; }
 
     /**
+     * @brief Determine current direction from shunt voltage (static utility)
+     * @param shuntVoltage_uV Shunt voltage in microvolts (signed)
+     * @return OUT if shuntVoltage_uV >= 0, IN if shuntVoltage_uV < 0
+     *
+     * Pure sign check, no I2C access needed.
+     * INA3221 shunt voltage register is signed two's complement:
+     *   positive → Shunt+ > Shunt- → current flows OUT to load
+     *   negative → Shunt+ < Shunt- → current flows IN from source
+     */
+    static INA3221_Direction getDirection(int16_t shuntVoltage_uV)
+    {
+        return (shuntVoltage_uV >= 0) ? INA3221_Direction::OUT : INA3221_Direction::IN;
+    }
+
+    /**
+     * @brief Read shunt voltage for a channel and determine direction
+     * @param channel Channel number (1, 2, or 3)
+     * @return Direction enum (OUT or IN), corrected for per-channel reversal
+     */
+    INA3221_Direction getChannelDirection(uint8_t channel);
+
+    /**
+     * @brief Configure per-channel direction reversal
+     *
+     * When a channel's IN+/IN- pins are swapped on the PCB (shunt resistor
+     * installed backwards), set reversed=true to flip the shunt voltage sign.
+     * This corrects the direction reported by getChannelDirection() and the
+     * values returned by readChannel().
+     *
+     * @param channel Channel number (1, 2, or 3)
+     * @param reversed true = IN+/IN- swapped, negate shunt voltage
+     */
+    void setChannelDirectionReversed(uint8_t channel, bool reversed);
+
+    /**
+     * @brief Query whether a channel is configured as direction-reversed
+     * @param channel Channel number (1, 2, or 3)
+     * @return true if this channel's direction is reversed
+     */
+    bool isChannelDirectionReversed(uint8_t channel) const;
+
+    /**
      * @brief Write full configuration register value
      * @param config 16-bit config value
      * @return true = write succeeded
@@ -177,6 +234,7 @@ private:
     I2C_HandleTypeDef* m_i2c = nullptr;
     uint8_t m_addr = 0x40;
     float m_shuntOhm = INA3221Config::DEFAULT_SHUNT_OHM;
+    bool m_reverseDir[3] = {false, false, false};  // per-channel IN+/IN- swap flag
 };
 
 /*============================================================================
@@ -192,6 +250,7 @@ bool b_INA3221_IsConnected(INA3221* dev);
 uint16_t u16_INA3221_ReadBusVoltage(INA3221* dev, uint8_t channel);
 int16_t s16_INA3221_ReadShuntVoltage(INA3221* dev, uint8_t channel);
 void v_INA3221_ReadAllChannels(INA3221* dev, INA3221_ChannelData data[3]);
+INA3221_Direction e_INA3221_GetChannelDirection(INA3221* dev, uint8_t channel);
 
 #ifdef __cplusplus
 }
