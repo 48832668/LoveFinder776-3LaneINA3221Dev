@@ -4,13 +4,16 @@
  * @author LoveFinder
  * @date 2026
  * 
- * Provides bitmap fonts for ST7735 LCD display
+ * Provides bitmap fonts for ST7735 LCD display.
+ * Font selection is controlled by USE_FONT_STYLE1_* / USE_FONT_STYLE2_* defines
+ * from fonts_config.hpp — only enabled fonts are compiled into the firmware.
  */
 
 #ifndef FONTS_HPP
 #define FONTS_HPP
 
 #include <cstdint>
+#include "fonts_config.hpp"
 
 /*============================================================================
  * Font Structure
@@ -23,30 +26,66 @@ struct FontDef {
 };
 
 /*============================================================================
- * Available Fonts (extern declarations)
+ * Available Fonts (extern declarations — conditional)
  *============================================================================*/
 
-// Small font: 7x10 pixels
-extern const FontDef Font_7x10;
+// ── Style 1: Classic proportional fonts ────────────────────────────────
 
+#if USE_FONT_STYLE1_7X10
+// Small font: 7x10 pixels (badges, debug screens)
+extern const FontDef Font_Style1_7x10;
+#endif
+
+#if USE_FONT_STYLE1_11X18
 // Medium font: 11x18 pixels
-extern const FontDef Font_11x18;
+extern const FontDef Font_Style1_11x18;
+#endif
 
+#if USE_FONT_STYLE1_16X26
 // Large font: 16x26 pixels
-extern const FontDef Font_16x26;
+extern const FontDef Font_Style1_16x26;
+#endif
 
-// Custom digit font: 9x18 pixels (narrow digits for 3-column current display)
-extern const FontDef Font_9x18;
+// ── Style 2: Custom narrow-digit fonts ─────────────────────────────────
+
+#if USE_FONT_STYLE2_9X18
+// Narrow font: 9x18 pixels (main display — all 4 rows)
+extern const FontDef Font_Style2_9x18;
+#endif
 
 /*============================================================================
- * Font Manager (Optional - for runtime font selection)
+ * Glyph Lookup — Per-Character Conditional Access
+ *============================================================================*/
+
+/**
+ * @brief Get glyph bitmap data for a character in the given font.
+ * 
+ * This replaces direct array indexing of font.data[].
+ * Each font stores only its used characters; missing chars return nullptr.
+ * 
+ * @param font Font definition
+ * @param ch   ASCII code (32-126)
+ * @return Pointer to height uint16_t values, or nullptr if glyph absent
+ */
+const uint16_t* font_get_glyph(const FontDef& font, uint8_t ch);
+
+/*============================================================================
+ * Font Manager (Optional — for runtime font selection)
  *============================================================================*/
 
 enum class e_Font_Size : uint8_t {
-    Small  = 0,   // 7x10
-    Medium = 1,   // 11x18
-    Large  = 2,   // 16x26
-    CustomDigit = 3  // 9x18
+#if USE_FONT_STYLE1_7X10
+    Style1_7x10 = 0,
+#endif
+#if USE_FONT_STYLE1_11X18
+    Style1_11x18 = 1,
+#endif
+#if USE_FONT_STYLE1_16X26
+    Style1_16x26 = 2,
+#endif
+#if USE_FONT_STYLE2_9X18
+    Style2_9x18 = 3,
+#endif
 };
 
 namespace FontManager {
@@ -57,11 +96,25 @@ namespace FontManager {
      */
     inline const FontDef& getFont(e_Font_Size size) {
         switch (size) {
-            case e_Font_Size::Small:  return Font_7x10;
-            case e_Font_Size::Medium: return Font_11x18;
-            case e_Font_Size::Large:  return Font_16x26;
-            case e_Font_Size::CustomDigit: return Font_9x18;
-            default:                  return Font_7x10;
+#if USE_FONT_STYLE1_7X10
+            case e_Font_Size::Style1_7x10:  return Font_Style1_7x10;
+#endif
+#if USE_FONT_STYLE1_11X18
+            case e_Font_Size::Style1_11x18: return Font_Style1_11x18;
+#endif
+#if USE_FONT_STYLE1_16X26
+            case e_Font_Size::Style1_16x26: return Font_Style1_16x26;
+#endif
+#if USE_FONT_STYLE2_9X18
+            case e_Font_Size::Style2_9x18:  return Font_Style2_9x18;
+#endif
+            default:
+#if USE_FONT_STYLE1_7X10
+                return Font_Style1_7x10;
+#else
+                // If no fonts are enabled, this will fail at link time
+                return *static_cast<const FontDef*>(nullptr);
+#endif
         }
     }
     

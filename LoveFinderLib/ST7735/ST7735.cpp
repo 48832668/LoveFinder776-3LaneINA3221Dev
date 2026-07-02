@@ -424,8 +424,9 @@ void ST7735::writeCharDMA(uint16_t x, uint16_t y, char ch, const FontDef& font,
     
     HAL_GPIO_WritePin(m_dcPort, m_dcPin, GPIO_PIN_SET);
     
-    // Get font data
-    const uint16_t* fontData = &font.data[(ch - 32) * font.height];
+    // Get font data via glyph lookup (supports per-character conditional compilation)
+    const uint16_t* fontData = font_get_glyph(font, static_cast<uint8_t>(ch));
+    if (!fontData) return;  // glyph not available in this font
     
     // Render each line
     for (uint16_t line = 0; line < font.height; line++) {

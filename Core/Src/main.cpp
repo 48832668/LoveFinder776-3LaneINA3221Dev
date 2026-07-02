@@ -42,33 +42,33 @@ namespace Display {
     constexpr uint8_t COL3_X = 96;   // CH3
     constexpr uint8_t COL_W  = 47;   // column width (leaves 1px gap before badge)
 
-    // Row Y positions
-    constexpr uint8_t STATUS_Y    = 0;     // Font_7x10: CHx (left) + input voltage (right)
-    constexpr uint8_t POWER_Y     = 11;    // Font_11x18: total power (left) + mAh (right)
-    constexpr uint8_t CURRENT_Y   = 35;    // Font_9x18: current XX.YY per column
-    constexpr uint8_t POWER_COL_Y = 56;    // Font_9x18: per-channel power X.X
+    // Row Y positions (all text uses Font_Style2_9x18, 18px height)
+    constexpr uint8_t STATUS_Y    = 0;     // Font_Style2_9x18: CHx (left) + input voltage (right)
+    constexpr uint8_t POWER_Y     = 19;    // Font_Style2_9x18: total power (left) + mAh (right)
+    constexpr uint8_t CURRENT_Y   = 39;    // Font_Style2_9x18: current XX.YY per column
+    constexpr uint8_t POWER_COL_Y = 60;    // Font_Style2_9x18: per-channel power X.X
 
     // Unit badge on the right of each row
     constexpr uint8_t BADGE_X   = 143;   // right side of 160px screen
-    constexpr uint8_t BADGE_Y   = CURRENT_Y + 2;    // 37
+    constexpr uint8_t BADGE_Y   = CURRENT_Y + 2;    // 41
     constexpr uint8_t BADGE_W   = 15;
     constexpr uint8_t BADGE_H   = 14;
     constexpr uint8_t BADGE_R   = 3;
 
     // Rounded rect around power row
     constexpr uint8_t POWER_RECT_X = 1;
-    constexpr uint8_t POWER_RECT_Y = 9;
+    constexpr uint8_t POWER_RECT_Y = 17;    // shifted down for taller Font_Style2_9x18 status row
     constexpr uint8_t POWER_RECT_W = 158;
-    constexpr uint8_t POWER_RECT_H = 22;
+    constexpr uint8_t POWER_RECT_H = 22;    // 2px padding top/bottom for 18px font
     constexpr uint8_t POWER_RADIUS = 4;
 
-    // Progress bar positions (just below each value)
-    constexpr uint8_t V_BAR_Y   = CURRENT_Y + 18 + 1;  // 54 — below current
-    constexpr uint8_t A_BAR_Y   = POWER_COL_Y + 18 + 1;  // 75 — below per-channel power
+    // Progress bar positions (directly below each value text, no gap)
+    constexpr uint8_t V_BAR_Y   = CURRENT_Y + 18;  // 57 — below current text
+    constexpr uint8_t A_BAR_Y   = POWER_COL_Y + 18;  // 78 — below per-channel power text
 
     // Progress bar dimensions
     constexpr uint8_t BAR_W     = 45;    // bar width (within 47px col)
-    constexpr uint8_t BAR_H     = 3;     // bar height
+    constexpr uint8_t BAR_H     = 2;     // bar height (reduced to fit 80px screen)
 
     // Max values for percentage
     constexpr uint16_t V_MAX_mV = 26000;  // 26V
@@ -77,8 +77,8 @@ namespace Display {
 
     // Progress bar animation
     constexpr uint8_t SEG_WIDTH  = 12;    // animated slider width (matching reference)
-    constexpr uint8_t MAX_POS    = BAR_W - SEG_WIDTH;  // 30
-    constexpr uint8_t ANIM_FRAMES = MAX_POS * 2;       // 60
+    constexpr uint8_t MAX_POS    = BAR_W - SEG_WIDTH;  // 33
+    constexpr uint8_t ANIM_FRAMES = MAX_POS * 2;       // 66
 
     // (OLD badge constants LABEL_BG_W/H/Y, LABEL_X_PAD removed - no longer used)
 }
@@ -192,18 +192,18 @@ void DisplayInit(void)
 {
     lcd.fillScreen(ST7735_Color::BLACK);
 
-    // Clear status bar area (top 10px)
-    lcd.fillRectangleFast(0, Display::STATUS_Y, 160, 10, ST7735_Color::BLACK);
+    // Clear status bar area (top 18px for Font_Style2_9x18)
+    lcd.fillRectangleFast(0, Display::STATUS_Y, 160, 18, ST7735_Color::BLACK);
 
     // Draw power rounded rectangle background (static, done once)
     fillRoundRect(Display::POWER_RECT_X, Display::POWER_RECT_Y,
                   Display::POWER_RECT_W, Display::POWER_RECT_H,
                   Display::POWER_RADIUS, ST7735_Color::DARK_GRAY);
 
-    // Clear current row area (Y=35, 18px)
+    // Clear current row area
     lcd.fillRectangleFast(0, Display::CURRENT_Y, 160, 18, ST7735_Color::BLACK);
 
-    // Clear per-channel power row area (Y=56, 18px)
+    // Clear per-channel power row area
     lcd.fillRectangleFast(0, Display::POWER_COL_Y, 160, 18, ST7735_Color::BLACK);
 
     // Draw unit badge backgrounds (static, done once)
@@ -216,10 +216,10 @@ void DisplayInit(void)
 
     // Write unit labels inside badges (centered in 15x14 rect)
     lcd.writeString(Display::BADGE_X + 4, Display::BADGE_Y + 2,
-                    "A", Font_7x10,
+                    "A", Font_Style1_7x10,
                     ST7735_Color::RGB565(100, 200, 255), ST7735_Color::DARK_GRAY);
     lcd.writeString(Display::BADGE_X + 4, Display::POWER_COL_Y + 4,
-                    "W", Font_7x10,
+                    "W", Font_Style1_7x10,
                     ST7735_Color::RGB565(230, 140, 30), ST7735_Color::DARK_GRAY);
 
     // Draw progress bar backgrounds (static, done once)
@@ -321,7 +321,7 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
         }
     }
 
-    // --- Row 1: Status Bar (Y=0, Font_7x10) ---
+    // --- Row 1: Status Bar (Y=0, Font_Style2_9x18) ---
     // Left: CH1/CH2/CH3 (input source) in the channel's own color
     if (inputChannel != prevInputChannel) {
         uint16_t chColor = (inputChannel >= 0) ? CH_COLOR[inputChannel] : ST7735_Color::GRAY;
@@ -330,24 +330,26 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
         } else {
             snprintf(buf, sizeof(buf), "---");
         }
-        lcd.writeString(0, Display::STATUS_Y, buf, Font_7x10,
+        // Clear old 18px text area to prevent ghosting
+        lcd.fillRectangleFast(0, Display::STATUS_Y, 160, 18, ST7735_Color::BLACK);
+        lcd.writeString(0, Display::STATUS_Y, buf, Font_Style2_9x18,
                         chColor, ST7735_Color::BLACK);
         prevInputChannel = static_cast<int8_t>(inputChannel);
     }
 
-    // Right: input voltage XX.YYV
+    // Right: input voltage XX.YYV (right-aligned with Font_Style2_9x18: 7 chars × 9px = 63px)
     {
         if (inputVoltage_mV != prevInputVoltage_mV) {
             uint16_t v_int = inputVoltage_mV / 1000;
             uint8_t  v_dec = (inputVoltage_mV % 1000) / 10;
             snprintf(buf, sizeof(buf), "%02u.%02uV", v_int, v_dec);
-            lcd.writeString(118, Display::STATUS_Y, buf, Font_7x10,
+            lcd.writeString(97, Display::STATUS_Y, buf, Font_Style2_9x18,
                             ST7735_Color::RGB565(180, 220, 100), ST7735_Color::BLACK);
             prevInputVoltage_mV = inputVoltage_mV;
         }
     }
 
-    // --- Row 2: Power + Charge (Y=11, Font_11x18 inside rounded rect) ---
+    // --- Row 2: Power + Charge (Font_Style2_9x18 inside rounded rect) ---
     // Always redraw both together (they're close enough to overlap)
     {
         uint16_t w_int  = static_cast<uint16_t>(totalW_x10 / 10);
@@ -357,12 +359,13 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
         if (totalW_x10 != prevPowerW_x10 || mAh != prevCharge_mAh) {
             snprintf(buf, sizeof(buf), "%03u.%uW", w_int, w_dec);
             lcd.writeString(Display::POWER_RECT_X + 2, Display::POWER_Y,
-                            buf, Font_11x18,
+                            buf, Font_Style2_9x18,
                             ST7735_Color::WHITE, ST7735_Color::DARK_GRAY);
 
+            // Right-align mAh: 8 chars × 9px = 72px
             snprintf(buf, sizeof(buf), "%05umAh", mAh);
-            lcd.writeString(Display::POWER_RECT_X + Display::POWER_RECT_W - 88 - 2,
-                            Display::POWER_Y, buf, Font_11x18,
+            lcd.writeString(Display::POWER_RECT_X + Display::POWER_RECT_W - 72 - 2,
+                            Display::POWER_Y, buf, Font_Style2_9x18,
                             ST7735_Color::RGB565(100, 200, 255), ST7735_Color::DARK_GRAY);
 
             prevPowerW_x10 = static_cast<uint16_t>(totalW_x10);
@@ -393,7 +396,7 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
         uint16_t power_x10 = static_cast<uint16_t>((static_cast<uint32_t>(v_mV) * abs_mA) / 100000);
         if (power_x10 > 999) power_x10 = 999;  // clamp to 99.9W
 
-        // --- Current (Font_9x18, left-aligned with A unit) ---
+        // --- Current (Font_Style2_9x18, left-aligned with A unit) ---
         if (i_mA != prevCurrent_mA[i] || isIn != prevIsIn[i])
         {
             uint32_t abs_mA2 = abs_mA;
@@ -406,7 +409,7 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
             uint16_t cColor = CH_COLOR_DIM[i];
 
             lcd.writeString(colX, Display::CURRENT_Y,
-                            buf, Font_9x18,
+                            buf, Font_Style2_9x18,
                             cColor, ST7735_Color::BLACK);
 
             prevCurrent_mA[i] = i_mA;
@@ -436,7 +439,7 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
             }
         }
 
-        // --- Per-Channel Power (Font_9x18, %03u.%u, color per channel) ---
+        // --- Per-Channel Power (Font_Style2_9x18, %03u.%u, color per channel) ---
         if (power_x10 != prevPower_x10[i])
         {
             uint8_t p_int = static_cast<uint8_t>(power_x10 / 10);
@@ -448,7 +451,7 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
                                   Display::COL_W, 18, ST7735_Color::BLACK);
 
             lcd.writeString(colX, Display::POWER_COL_Y,
-                            buf, Font_9x18,
+                            buf, Font_Style2_9x18,
                             CH_COLOR[i], ST7735_Color::BLACK);
 
             prevPower_x10[i] = power_x10;
@@ -509,7 +512,7 @@ int main(void)
     if (!ina3221.init(&hi2c1, INA3221_ADDR, SHUNT_RESISTOR))
     {
         // INA3221 not found - show error
-        lcd.writeString(30, 30, "INA3221 Not Found!", Font_7x10,
+        lcd.writeString(30, 30, "INA3221 Not Found!", Font_Style1_7x10,
                         ST7735_Color::RED, ST7735_Color::BLACK);
         while (1) { HAL_Delay(1000); }
     }
@@ -554,7 +557,7 @@ while (1)
         {
             // I2C re-scan placeholder - show device list briefly
             lcd.fillScreen(ST7735_Color::BLACK);
-            lcd.writeString(30, 0, "I2C Devices", Font_7x10,
+            lcd.writeString(30, 0, "I2C Devices", Font_Style1_7x10,
                             ST7735_Color::CYAN, ST7735_Color::BLACK);
 
             uint8_t devices[16];
@@ -563,7 +566,7 @@ while (1)
             for (uint8_t j = 0; j < count; j++)
             {
                 snprintf(mainBuf, sizeof(mainBuf), "0x%02X", devices[j]);
-                lcd.writeString(5, y, mainBuf, Font_7x10,
+                lcd.writeString(5, y, mainBuf, Font_Style1_7x10,
                                 ST7735_Color::WHITE, ST7735_Color::BLACK);
                 y += 12;
             }
