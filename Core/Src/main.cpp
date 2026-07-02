@@ -37,16 +37,23 @@ constexpr float SHUNT_RESISTOR = 0.01f;
 // Display layout (160x80 LCD)
 namespace Display {
     // Column positions for 3-channel display
-    constexpr uint8_t COL1_X = 3;    // CH1
-    constexpr uint8_t COL2_X = 58;   // CH2
-    constexpr uint8_t COL3_X = 113;  // CH3
-    constexpr uint8_t COL_W  = 48;   // column width
+    constexpr uint8_t COL1_X = 0;    // CH1
+    constexpr uint8_t COL2_X = 48;   // CH2
+    constexpr uint8_t COL3_X = 96;   // CH3
+    constexpr uint8_t COL_W  = 47;   // column width (leaves 1px gap before badge)
 
     // Row Y positions
     constexpr uint8_t STATUS_Y    = 0;     // Font_7x10: CHx (left) + input voltage (right)
     constexpr uint8_t POWER_Y     = 11;    // Font_11x18: total power (left) + mAh (right)
     constexpr uint8_t CURRENT_Y   = 35;    // Font_9x18: current XX.YY per column
-    constexpr uint8_t POWER_COL_Y = 56;    // Font_9x18: per-channel power XXX.Y (no unit)
+    constexpr uint8_t POWER_COL_Y = 56;    // Font_9x18: per-channel power X.X
+
+    // Unit badge on the right of each row
+    constexpr uint8_t BADGE_X   = 143;   // right side of 160px screen
+    constexpr uint8_t BADGE_Y   = CURRENT_Y + 2;    // 37
+    constexpr uint8_t BADGE_W   = 15;
+    constexpr uint8_t BADGE_H   = 14;
+    constexpr uint8_t BADGE_R   = 3;
 
     // Rounded rect around power row
     constexpr uint8_t POWER_RECT_X = 1;
@@ -60,7 +67,7 @@ namespace Display {
     constexpr uint8_t A_BAR_Y   = POWER_COL_Y + 18 + 1;  // 75 — below per-channel power
 
     // Progress bar dimensions
-    constexpr uint8_t BAR_W     = 42;    // bar width (matching reference)
+    constexpr uint8_t BAR_W     = 45;    // bar width (within 47px col)
     constexpr uint8_t BAR_H     = 3;     // bar height
 
     // Max values for percentage
@@ -83,81 +90,19 @@ constexpr uint8_t COL_X[3] = {
     Display::COL3_X
 };
 
-/*============================================================================
- * Color Gradient Helpers
- *============================================================================*/
+// Per-channel accent colors (for power text, power bar, CHx label)
+constexpr uint16_t CH_COLOR[3] = {
+    ST7735_Color::RGB565(0,   200, 255),   // CH1: bright cyan
+    ST7735_Color::RGB565(255, 200, 0),     // CH2: amber/gold
+    ST7735_Color::RGB565(255, 100, 200),   // CH3: pink/magenta
+};
 
-// Linear interpolate between two RGB565 colors in 5/6/5 space
-// t: 0-255, t=0 → c1, t=255 → c2
-static uint16_t lerpColor565(uint16_t c1, uint16_t c2, uint8_t t) {
-    uint8_t r1 = (c1 >> 11) & 0x1F;
-    uint8_t g1 = (c1 >> 5)  & 0x3F;
-    uint8_t b1 =  c1        & 0x1F;
-    uint8_t r2 = (c2 >> 11) & 0x1F;
-    uint8_t g2 = (c2 >> 5)  & 0x3F;
-    uint8_t b2 =  c2        & 0x1F;
-
-    uint8_t r = r1 + ((static_cast<uint16_t>(r2 - r1) * t) >> 8);
-    uint8_t g = g1 + ((static_cast<uint16_t>(g2 - g1) * t) >> 8);
-    uint8_t b = b1 + ((static_cast<uint16_t>(b2 - b1) * t) >> 8);
-
-    return (static_cast<uint16_t>(r) << 11) | (static_cast<uint16_t>(g) << 5) | b;
-}
-
-// Voltage color: green(0V) → yellow(5V) → orange(12V) → red(26V)
-static uint16_t voltageColor(uint16_t mv) {
-    if (mv < 5000) {
-        uint8_t t = (mv * 255) / 5000;          // 0→5V: GREEN → YELLOW
-        return lerpColor565(ST7735_Color::GREEN, ST7735_Color::YELLOW, t);
-    } else if (mv < 12000) {
-        uint8_t t = ((mv - 5000) * 255) / 7000; // 5→12V: YELLOW → ORANGE
-        return lerpColor565(ST7735_Color::YELLOW, ST7735_Color::ORANGE, t);
-    } else {
-        uint8_t t = ((mv - 12000) * 255) / 14000; // 12→26V: ORANGE → RED
-        if (t > 255) t = 255;
-        return lerpColor565(ST7735_Color::ORANGE, ST7735_Color::RED, t);
-    }
-}
-
-// Current color: directional palettes
-// OUT: dim cyan(0A) → bright cyan → bright blue(10A)
-// IN : warm yellow(0A) → orange → RED(10A)
-static uint16_t currentColor(int32_t mA, bool isIn) {
-    uint32_t abs_mA = (mA >= 0) ? static_cast<uint32_t>(mA) : static_cast<uint32_t>(-mA);
-    if (abs_mA > 10000) abs_mA = 10000;
-    uint8_t t = (abs_mA * 255) / 10000;
-
-    if (isIn) {
-        // IN: dim warm yellow → orange → red
-        constexpr uint16_t DIM_WARM = ST7735_Color::RGB565(180, 120, 0);   // low current IN
-        if (abs_mA < 5000) {
-            uint8_t t2 = (abs_mA * 255) / 5000;
-            return lerpColor565(DIM_WARM, ST7735_Color::ORANGE, t2);
-        } else {
-            uint8_t t2 = ((abs_mA - 5000) * 255) / 5000;
-            return lerpColor565(ST7735_Color::ORANGE, ST7735_Color::RED, t2);
-        }
-    } else {
-        // OUT: dim cyan → bright cyan → blue
-        constexpr uint16_t DIM_CYAN = ST7735_Color::RGB565(60, 160, 180);  // low current OUT
-        if (abs_mA < 5000) {
-            uint8_t t2 = (abs_mA * 255) / 5000;
-            return lerpColor565(DIM_CYAN, ST7735_Color::CYAN, t2);
-        } else {
-            uint8_t t2 = ((abs_mA - 5000) * 255) / 5000;
-            return lerpColor565(ST7735_Color::CYAN, ST7735_Color::BRIGHT_BLUE, t2);
-        }
-    }
-}
-
-// Bar fill color uses the same gradient as text color
-static uint16_t voltageBarColor(uint16_t mv) {
-    return voltageColor(mv);
-}
-
-static uint16_t currentBarColor(int32_t mA, bool isIn) {
-    return currentColor(mA, isIn);
-}
+// Dimmed variant for current text/bar (lower saturation, same hue)
+constexpr uint16_t CH_COLOR_DIM[3] = {
+    ST7735_Color::RGB565(0,   140, 190),   // CH1: dimmer cyan
+    ST7735_Color::RGB565(190, 150, 0),     // CH2: dimmer amber
+    ST7735_Color::RGB565(190, 70,  150),   // CH3: dimmer pink
+};
 
 /*============================================================================
  * Global Variables
@@ -261,6 +206,22 @@ void DisplayInit(void)
     // Clear per-channel power row area (Y=56, 18px)
     lcd.fillRectangleFast(0, Display::POWER_COL_Y, 160, 18, ST7735_Color::BLACK);
 
+    // Draw unit badge backgrounds (static, done once)
+    fillRoundRect(Display::BADGE_X, Display::BADGE_Y,
+                  Display::BADGE_W, Display::BADGE_H,
+                  Display::BADGE_R, ST7735_Color::DARK_GRAY);
+    fillRoundRect(Display::BADGE_X, Display::POWER_COL_Y + 2,
+                  Display::BADGE_W, Display::BADGE_H,
+                  Display::BADGE_R, ST7735_Color::DARK_GRAY);
+
+    // Write unit labels inside badges (centered in 15x14 rect)
+    lcd.writeString(Display::BADGE_X + 4, Display::BADGE_Y + 2,
+                    "A", Font_7x10,
+                    ST7735_Color::RGB565(100, 200, 255), ST7735_Color::DARK_GRAY);
+    lcd.writeString(Display::BADGE_X + 4, Display::POWER_COL_Y + 4,
+                    "W", Font_7x10,
+                    ST7735_Color::RGB565(230, 140, 30), ST7735_Color::DARK_GRAY);
+
     // Draw progress bar backgrounds (static, done once)
     for (int i = 0; i < 3; i++) {
         lcd.fillRectangleFast(COL_X[i], Display::V_BAR_Y,
@@ -361,15 +322,16 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
     }
 
     // --- Row 1: Status Bar (Y=0, Font_7x10) ---
-    // Left: CH1/CH2/CH3 (input source)
+    // Left: CH1/CH2/CH3 (input source) in the channel's own color
     if (inputChannel != prevInputChannel) {
+        uint16_t chColor = (inputChannel >= 0) ? CH_COLOR[inputChannel] : ST7735_Color::GRAY;
         if (inputChannel >= 0) {
             snprintf(buf, sizeof(buf), "CH%d", inputChannel + 1);
         } else {
             snprintf(buf, sizeof(buf), "---");
         }
         lcd.writeString(0, Display::STATUS_Y, buf, Font_7x10,
-                        ST7735_Color::RGB565(230, 140, 30), ST7735_Color::BLACK);
+                        chColor, ST7735_Color::BLACK);
         prevInputChannel = static_cast<int8_t>(inputChannel);
     }
 
@@ -431,7 +393,7 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
         uint16_t power_x10 = static_cast<uint16_t>((static_cast<uint32_t>(v_mV) * abs_mA) / 100000);
         if (power_x10 > 999) power_x10 = 999;  // clamp to 99.9W
 
-        // --- Current (Font_9x18, IN centered) ---
+        // --- Current (Font_9x18, left-aligned with A unit) ---
         if (i_mA != prevCurrent_mA[i] || isIn != prevIsIn[i])
         {
             uint32_t abs_mA2 = abs_mA;
@@ -441,18 +403,12 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
             uint8_t dec_part = static_cast<uint8_t>((abs_mA2 % 1000) / 10);
             snprintf(buf, sizeof(buf), "%02u.%02u", int_part, dec_part);
 
-            uint16_t cColor = currentColor(i_mA, isIn);
+            uint16_t cColor = CH_COLOR_DIM[i];
 
-            uint8_t curX = colX;
-            if (isIn) {
-                int16_t textW = 5 * 9;
-                int16_t pad = (static_cast<int16_t>(Display::COL_W) - textW) / 2;
-                if (pad > 0) curX = colX + static_cast<uint8_t>(pad);
-            }
-
-            lcd.writeString(curX, Display::CURRENT_Y,
+            lcd.writeString(colX, Display::CURRENT_Y,
                             buf, Font_9x18,
                             cColor, ST7735_Color::BLACK);
+
             prevCurrent_mA[i] = i_mA;
             prevIsIn[i] = isIn;
         }
@@ -470,25 +426,31 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
                 if (idle) {
                     lcd.fillRectangleFast(colX + animPos, Display::V_BAR_Y,
                                           Display::SEG_WIDTH, Display::BAR_H,
-                                          currentBarColor(i_mA, isIn));
+                                          CH_COLOR_DIM[i]);
                 } else if (w > 0) {
                     lcd.fillRectangleFast(colX, Display::V_BAR_Y,
                                           w, Display::BAR_H,
-                                          currentBarColor(i_mA, isIn));
+                                          CH_COLOR_DIM[i]);
                 }
                 prevVBarW[i] = w;
             }
         }
 
-        // --- Per-Channel Power (Font_9x18, XXX.Y, no unit) ---
+        // --- Per-Channel Power (Font_9x18, %03u.%u, color per channel) ---
         if (power_x10 != prevPower_x10[i])
         {
             uint8_t p_int = static_cast<uint8_t>(power_x10 / 10);
             uint8_t p_dec = static_cast<uint8_t>(power_x10 % 10);
-            snprintf(buf, sizeof(buf), "%3u.%u", p_int, p_dec);
+            snprintf(buf, sizeof(buf), "%03u.%u", p_int, p_dec);
+
+            // Clear entire column area to prevent ghosting when width changes
+            lcd.fillRectangleFast(colX, Display::POWER_COL_Y,
+                                  Display::COL_W, 18, ST7735_Color::BLACK);
+
             lcd.writeString(colX, Display::POWER_COL_Y,
                             buf, Font_9x18,
-                            voltageColor(v_mV), ST7735_Color::BLACK);
+                            CH_COLOR[i], ST7735_Color::BLACK);
+
             prevPower_x10[i] = power_x10;
         }
 
@@ -505,11 +467,11 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
                 if (idle) {
                     lcd.fillRectangleFast(colX + animPos, Display::A_BAR_Y,
                                           Display::SEG_WIDTH, Display::BAR_H,
-                                          voltageBarColor(v_mV));
+                                          CH_COLOR[i]);
                 } else if (w > 0) {
                     lcd.fillRectangleFast(colX, Display::A_BAR_Y,
                                           w, Display::BAR_H,
-                                          voltageBarColor(v_mV));
+                                          CH_COLOR[i]);
                 }
                 prevABarW[i] = w;
             }
@@ -565,12 +527,6 @@ int main(void)
 
     // Initialize display layout
     DisplayInit();
-
-    // Show INA3221 found status on status bar briefly, then clear
-    lcd.writeString(0, 0, "INA3221 Ready", Font_7x10,
-                    ST7735_Color::GREEN, ST7735_Color::BLACK);
-    HAL_Delay(800);
-    lcd.fillRectangleFast(0, 0, 160, 10, ST7735_Color::BLACK);
 
     // Start TIM3 for 200ms periodic tick
     HAL_TIM_Base_Start_IT(&htim3);
