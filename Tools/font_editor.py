@@ -25,8 +25,9 @@ HERE = Path(__file__).resolve().parent
 FONTS_CPP = HERE.parent / "LoveFinderLib" / "ST7735" / "fonts.cpp"
 
 FONT_SPECS = {
-    's1': {'rows': 10, 'cols': 7, 'cols_bit': 7, 'label': 'Style1 (7×10)', 'vpl': 5},
-    's2': {'rows': 18, 'cols': 7, 'cols_bit': 7, 'label': 'Style2 (9×18)', 'vpl': 6},
+    's1': {'rows': 10, 'cols': 7,  'cols_bit': 7,  'label': 'Style1 (7×10)',  'vpl': 5, 'bit_shift': 8},
+    's2': {'rows': 18, 'cols': 7,  'cols_bit': 7,  'label': 'Style2 (9×18)',  'vpl': 6, 'bit_shift': 8},
+    's3': {'rows': 16, 'cols': 16, 'cols_bit': 16, 'label': 'Style3 (16×16)', 'vpl': 4, 'bit_shift': 0},
 }
 
 # ─── 主题配色 ───────────────────────────────────────────────────────
@@ -43,8 +44,9 @@ C_MODIFIED = '#ff6633'
 
 # ─── 正则 ───────────────────────────────────────────────────────────
 RE_HEX   = re.compile(r'0x([0-9A-Fa-f]{4})')
-RE_DECL  = re.compile(r'static constexpr uint16_t (s[12]_\w+)\[(\d+)\] = \{')
+RE_DECL  = re.compile(r'static constexpr uint16_t (s[123]_\w+)\[(\d+)\] = \{')
 RE_AC    = re.compile(r'// ASCII (\d+) \(([^)]*)\)')
+RE_UNI   = re.compile(r'// ([^\s]+) \(U\+([0-9A-Fa-f]+)\)')
 
 # ═══════════════════════════════════════════════════════════════════
 #  GlyphData — 单个字体的像素数据模型
@@ -57,26 +59,43 @@ class GlyphData:
         self.rows = s['rows']
         self.cols = s['cols']
         self.ascii = None
+        self.unicode = None
         self.char = ''
         self.pixels = [[False] * self.cols for _ in range(self.rows)]
 
+    @property
+    def label(self):
+        label = self.name
+        if self.char:
+            label += f'  "{self.char}"'
+        if self.ascii is not None:
+            label += f'  (ASCII {self.ascii})'
+        if self.unicode is not None:
+            label += f'  (U+{self.unicode:04X})'
+        return label
+
     def load_hex(self, hex_vals):
         """从 uint16_t 列表加载像素状态。"""
+        spec = FONT_SPECS[self.font_id]
+        cols_bit = spec['cols_bit']
+        bit_shift = spec['bit_shift']
         for r in range(min(len(hex_vals), self.rows)):
-            v = int(hex_vals[r], 16)
-            b = (v >> 8) & 0xFF
+            v = int(hex_vals[r], 16) << bit_shift
             for c in range(self.cols):
-                self.pixels[r][c] = bool(b & (1 << (6 - c)))
+                self.pixels[r][c] = bool(v & (1 << (cols_bit - 1 - c)))
 
     def dump_hex(self):
         """返回 uint16_t 值列表。"""
+        spec = FONT_SPECS[self.font_id]
+        cols_bit = spec['cols_bit']
+        bit_shift = spec['bit_shift']
         vals = []
         for r in range(self.rows):
-            byte = 0
+            v = 0
             for c in range(self.cols):
                 if self.pixels[r][c]:
-                    byte |= 1 << (6 - c)
-            vals.append(byte << 8)
+                    v |= 1 << (cols_bit - 1 - c)
+            vals.append(v >> bit_shift)
         return vals
 
     def format_hex_block(self):
@@ -90,10 +109,10 @@ class GlyphData:
         return '\n'.join(lines)
 
     def render_ascii(self):
-        """返回纯文本点阵预览。"""
+        """返回纯文本点阵预览（使用██使比例更真实）。"""
         rows = []
         for r in range(self.rows):
-            row = ''.join('█' if p else ' ' for p in self.pixels[r])
+            row = ''.join('██' if p else '  ' for p in self.pixels[r])
             rows.append(row)
         return '\n'.join(rows)
 
@@ -118,7 +137,17 @@ class FontFile:
         for m in RE_DECL.finditer(self.text):
             name = m.group(1)
             rows_decl = int(m.group(2))
-            font_id = 's1' if name.startswith('s1_') else 's2'
+            
+            # Detect font ID from prefix
+            if name.startswith('s1_'):
+                font_id = 's1'
+            elif name.startswith('s2_'):
+                font_id = 's2'
+            elif name.startswith('s3_'):
+                font_id = 's3'
+            else:
+                continue
+                
             spec = FONT_SPECS.get(font_id)
             if not spec or rows_decl != spec['rows']:
                 continue
@@ -137,16 +166,27 @@ class FontFile:
             gd = GlyphData(name, font_id)
             gd.load_hex(['0x' + h for h in hex_vals])
 
-            # 向前找 ASCII 注释
+            # 向前找注释——ASCII 兼容 s1/s2，Unicode 兼容 s3
             pre = self.text[:m.start()]
+            
+            # Try Unicode comment first: "你 (U+4F60)"
+            uni_matches = list(RE_UNI.finditer(pre))
+            if uni_matches:
+                last = uni_matches[-1]
+                gap = pre[last.end():].count('\n')
+                if gap <= 2:
+                    gd.char = last.group(1).strip()
+                    gd.unicode = int(last.group(2), 16)
+
+            # Try ASCII comment (for s1/s2)
             acs = list(RE_AC.finditer(pre))
             if acs:
                 last = acs[-1]
                 gap = pre[last.end():].count('\n')
                 if gap <= 2:
                     gd.ascii = int(last.group(1))
-                    gd.char = last.group(2).strip('()')
-                    # 如果 char 是空格或不可见，保留原样
+                    if not gd.char:
+                        gd.char = last.group(2).strip('()')
 
             block_end = m.end() + end_m.end()
             self.glyphs[name] = gd
@@ -187,14 +227,15 @@ class FontFile:
         return True
 
     def get_sorted_names(self, font_id):
-        """按 ascii 码排序的 glyph 名称列表。"""
+        """按 ascii/unicode 码排序的 glyph 名称列表。"""
         names = [n for n in self.glyphs if n.startswith(font_id + '_')]
         def sort_key(n):
             g = self.glyphs[n]
+            if g.unicode is not None:
+                return (0, g.unicode)
             if g.ascii is not None:
-                return (0, g.ascii)
-            # 无名 glyph（s1_xxx）按名称排序
-            return (1, n)
+                return (1, g.ascii)
+            return (2, n)
         names.sort(key=sort_key)
         return names
 
@@ -325,7 +366,7 @@ class FontEditor(tk.Tk):
         self._build_ui()
 
         # ─── 初始选择 ────────────────────────────────────────────
-        self.font_combo.current(1)  # s2
+        self.font_combo.current(2)  # s3
         self._on_font_change()
 
     # ─── UI 构建 ────────────────────────────────────────────────────
@@ -344,7 +385,7 @@ class FontEditor(tk.Tk):
 
         ttk.Label(toolbar, text='字体:').pack(side=tk.LEFT, padx=(0, 2))
         self.font_combo = ttk.Combobox(toolbar,
-                                       values=[FONT_SPECS[f]['label'] for f in ['s1', 's2']],
+                                       values=[FONT_SPECS[f]['label'] for f in ['s1', 's2', 's3']],
                                        state='readonly', width=18)
         self.font_combo.pack(side=tk.LEFT, padx=(0, 8))
         self.font_combo.bind('<<ComboboxSelected>>', lambda e: self._on_font_change())
@@ -420,17 +461,14 @@ class FontEditor(tk.Tk):
 
     def _on_font_change(self):
         idx = self.font_combo.current()
-        font_ids = ['s1', 's2']
+        font_ids = ['s1', 's2', 's3']
         self.current_font = font_ids[idx]
 
         names = self.fnt.get_sorted_names(self.current_font)
         display = []
         for n in names:
             g = self.fnt.glyphs[n]
-            if g.char:
-                display.append(f'{g.char}  ({n})')
-            else:
-                display.append(f'{n}')
+            display.append(g.label)
         self.glyph_combo['values'] = display
 
         if display:
@@ -490,13 +528,7 @@ class FontEditor(tk.Tk):
             self.info_var.set('')
             return
         gd = self.fnt.glyphs[self.current_name]
-        parts = [f'{self.current_name}']
-        if gd.char:
-            parts.append(f'字符="{gd.char}"')
-        if gd.ascii is not None:
-            parts.append(f'ASCII={gd.ascii}')
-        parts.append(f'{gd.rows}×{gd.cols}')
-        self.info_var.set(' | '.join(parts))
+        self.info_var.set(gd.label)
 
     def _update_grid(self):
         gd = self.fnt.glyphs.get(self.current_name)

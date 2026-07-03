@@ -209,6 +209,12 @@ public:
     void writeStringDMA(uint16_t x, uint16_t y, const char* str, const FontDef& font,
                         uint16_t color, uint16_t bgcolor);
     
+    // Unicode/UTF-8 text drawing (for Chinese fonts)
+    void writeCharUnicodeDMA(uint16_t x, uint16_t y, uint16_t uni, const FontDef& font,
+                             uint16_t color, uint16_t bgcolor);
+    void writeStringChineseDMA(uint16_t x, uint16_t y, const char* utf8_str, const FontDef& font,
+                               uint16_t color, uint16_t bgcolor);
+    
     bool print(uint16_t x, uint16_t y, const FontDef& font, 
                uint16_t color, uint16_t bgcolor, const char* format, ...);
     bool printDMA(uint16_t x, uint16_t y, const FontDef& font,

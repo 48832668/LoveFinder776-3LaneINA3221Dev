@@ -43,4 +43,11 @@
 #define USE_FONT_STYLE2_9X18    1   // 9×18  — main display font (all 4 rows)
 #endif
 
+// ------------------------------------------------------------------
+// Style 3 — Chinese bitmap font (16×16)
+// ------------------------------------------------------------------
+#ifndef USE_FONT_STYLE3_ZH_16X16
+#define USE_FONT_STYLE3_ZH_16X16   1   // 16×16 — Chinese characters (splash screen)
+#endif
+
 #endif // FONTS_CONFIG_HPP

@@ -53,6 +53,13 @@ extern const FontDef Font_Style1_16x26;
 extern const FontDef Font_Style2_9x18;
 #endif
 
+// ── Style 3: Chinese bitmap font ─────────────────────────────────────
+
+#if USE_FONT_STYLE3_ZH_16X16
+// Chinese font: 16x16 pixels (splash screen)
+extern const FontDef Font_Style3_ZH_16x16;
+#endif
+
 /*============================================================================
  * Glyph Lookup — Per-Character Conditional Access
  *============================================================================*/
@@ -68,6 +75,14 @@ extern const FontDef Font_Style2_9x18;
  * @return Pointer to height uint16_t values, or nullptr if glyph absent
  */
 const uint16_t* font_get_glyph(const FontDef& font, uint8_t ch);
+
+/**
+ * @brief Get glyph bitmap data for a Unicode character (used by Chinese fonts).
+ * @param font Font definition
+ * @param uni  Unicode code point (e.g. 0x4F60 = 你, 0x597D = 好)
+ * @return Pointer to height uint16_t values, or nullptr if glyph absent
+ */
+const uint16_t* font_get_glyph_unicode(const FontDef& font, uint16_t uni);
 
 /*============================================================================
  * Font Manager (Optional — for runtime font selection)
@@ -85,6 +100,9 @@ enum class e_Font_Size : uint8_t {
 #endif
 #if USE_FONT_STYLE2_9X18
     Style2_9x18 = 3,
+#endif
+#if USE_FONT_STYLE3_ZH_16X16
+    Style3_ZH_16x16 = 4,
 #endif
 };
 
@@ -107,6 +125,9 @@ namespace FontManager {
 #endif
 #if USE_FONT_STYLE2_9X18
             case e_Font_Size::Style2_9x18:  return Font_Style2_9x18;
+#endif
+#if USE_FONT_STYLE3_ZH_16X16
+            case e_Font_Size::Style3_ZH_16x16: return Font_Style3_ZH_16x16;
 #endif
             default:
 #if USE_FONT_STYLE1_7X10

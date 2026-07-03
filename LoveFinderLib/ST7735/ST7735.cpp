@@ -523,6 +523,113 @@ bool ST7735::vprint(uint16_t x, uint16_t y, const FontDef& font,
 }
 
 /*============================================================================
+ * Unicode / UTF-8 Text Drawing (for Chinese fonts)
+ *============================================================================*/
+
+void ST7735::writeCharUnicodeDMA(uint16_t x, uint16_t y, uint16_t uni, const FontDef& font,
+                                 uint16_t color, uint16_t bgcolor)
+{
+    if (x + font.width > ST7735Config::WIDTH || y + font.height > ST7735Config::HEIGHT) return;
+    
+    select();
+    setAddressWindow(x, y, x + font.width - 1, y + font.height - 1);
+    
+    uint16_t bytesPerLine = font.width * 2;
+    
+    uint8_t colorHi = color >> 8;
+    uint8_t colorLo = color & 0xFF;
+    uint8_t bgHi = bgcolor >> 8;
+    uint8_t bgLo = bgcolor & 0xFF;
+    
+    HAL_GPIO_WritePin(m_dcPort, m_dcPin, GPIO_PIN_SET);
+    
+    // Get glyph data via Unicode lookup
+    const uint16_t* fontData = font_get_glyph_unicode(font, uni);
+    if (!fontData) return;  // glyph not available
+    
+    // Render each line (same as writeCharDMA but uses Unicode lookup)
+    for (uint16_t line = 0; line < font.height; line++) {
+        uint16_t lineData = fontData[line];
+        
+        for (uint16_t col = 0; col < font.width; col++) {
+            uint16_t bufIdx = col * 2;
+            if ((lineData << col) & 0x8000) {
+                s_dmaBuffer[0][bufIdx] = colorHi;
+                s_dmaBuffer[0][bufIdx + 1] = colorLo;
+            } else {
+                s_dmaBuffer[0][bufIdx] = bgHi;
+                s_dmaBuffer[0][bufIdx + 1] = bgLo;
+            }
+        }
+        
+        HAL_SPI_Transmit_DMA(m_spi, s_dmaBuffer[0], bytesPerLine);
+        waitForDMA(ST7735Config::DMA_TIMEOUT_MS);
+    }
+    
+    deselect();
+}
+
+void ST7735::writeStringChineseDMA(uint16_t x, uint16_t y, const char* utf8_str, const FontDef& font,
+                                   uint16_t color, uint16_t bgcolor)
+{
+    uint16_t currentX = x;
+    uint16_t currentY = y;
+    
+    while (*utf8_str) {
+        uint16_t uni;
+        
+        // Decode UTF-8 to Unicode code point
+        uint8_t byte0 = static_cast<uint8_t>(*utf8_str);
+        
+        if (byte0 < 0x80) {
+            // Single byte (ASCII)
+            uni = byte0;
+            utf8_str++;
+        } else if ((byte0 & 0xE0) == 0xC0) {
+            // 2-byte UTF-8
+            uni = (byte0 & 0x1F) << 6;
+            utf8_str++;
+            if (*utf8_str) {
+                uni |= (static_cast<uint8_t>(*utf8_str) & 0x3F);
+                utf8_str++;
+            }
+        } else if ((byte0 & 0xF0) == 0xE0) {
+            // 3-byte UTF-8 (CJK characters)
+            uni = (byte0 & 0x0F) << 12;
+            utf8_str++;
+            if (*utf8_str) {
+                uni |= (static_cast<uint8_t>(*utf8_str) & 0x3F) << 6;
+                utf8_str++;
+            }
+            if (*utf8_str) {
+                uni |= (static_cast<uint8_t>(*utf8_str) & 0x3F);
+                utf8_str++;
+            }
+        } else if ((byte0 & 0xF8) == 0xF0) {
+            // 4-byte UTF-8 (rare, skip)
+            utf8_str++;
+            if (*utf8_str) utf8_str++;
+            if (*utf8_str) utf8_str++;
+            if (*utf8_str) utf8_str++;
+            continue;
+        } else {
+            utf8_str++;
+            continue;
+        }
+        
+        // Line wrap check
+        if (currentX + font.width > ST7735Config::WIDTH) {
+            currentX = x;
+            currentY += font.height;
+            if (currentY + font.height > ST7735Config::HEIGHT) break;
+        }
+        
+        writeCharUnicodeDMA(currentX, currentY, uni, font, color, bgcolor);
+        currentX += font.width;
+    }
+}
+
+/*============================================================================
  * Display Control
  *============================================================================*/
 
