@@ -33,10 +33,10 @@ static uint8_t getBusReg(uint8_t channel)
  * Public Methods
  *============================================================================*/
 
-bool INA3221::init(I2C_HandleTypeDef* hi2c, uint8_t addr, float shuntOhm)
+bool INA3221::init(I2C_HandleTypeDef* hi2c, uint8_t addr, const ShuntConfig& shuntCfg)
 {
     m_addr = addr;
-    m_shuntOhm = shuntOhm;
+    m_shuntCfg = shuntCfg;
     m_i2c = hi2c;
 
     // Configure: all channels enabled, 128-sample averaging,
@@ -141,13 +141,25 @@ INA3221_ChannelData INA3221::readChannel(uint8_t channel)
         correctedShunt = -correctedShunt;
     }
 
-    // Current = corrected shunt voltage / shunt resistance
-    if (m_shuntOhm > 0.0001f) {
-        float currentA = static_cast<float>(correctedShunt) / 1000000.0f / m_shuntOhm;
+    // Current = corrected shunt voltage / shunt resistance (per-channel)
+    float shuntOhm = m_shuntCfg.get(channel);
+    if (shuntOhm > 0.0001f) {
+        float currentA = static_cast<float>(correctedShunt) / 1000000.0f / shuntOhm;
         data.current_mA = static_cast<int32_t>(currentA * 1000.0f);
     }
 
     return data;
+}
+
+void INA3221::setShuntResistor(uint8_t channel, float shuntOhm)
+{
+    if (channel < 1 || channel > 3) return;
+    switch (channel) {
+        case 1: m_shuntCfg.ch1 = shuntOhm; break;
+        case 2: m_shuntCfg.ch2 = shuntOhm; break;
+        case 3: m_shuntCfg.ch3 = shuntOhm; break;
+        default: break;
+    }
 }
 
 void INA3221::setChannelDirectionReversed(uint8_t channel, bool reversed)
@@ -201,9 +213,9 @@ uint16_t INA3221::readDieId()
 
 extern "C" {
 
-bool b_INA3221_Init(INA3221* dev, I2C_HandleTypeDef* hi2c, uint8_t addr, float shuntOhm)
+bool b_INA3221_Init(INA3221* dev, I2C_HandleTypeDef* hi2c, uint8_t addr, const ShuntConfig& shuntCfg)
 {
-    return dev->init(hi2c, addr, shuntOhm);
+    return dev->init(hi2c, addr, shuntCfg);
 }
 
 bool b_INA3221_IsConnected(INA3221* dev)

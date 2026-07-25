@@ -24,7 +24,6 @@
 namespace INA3221Config {
     // I2C Address (7-bit) - depends on A0 pin
     // A0=GND => 0x40, A0=VS => 0x41, A0=SDA => 0x42, A0=SCL => 0x43
-    // Default shunt resistor: 0.1Ω (100mΩ) for current calculation
     constexpr float DEFAULT_SHUNT_OHM = 0.1f;
 
     // Register addresses
@@ -80,6 +79,50 @@ namespace INA3221Config {
 }
 
 /*============================================================================
+ * Shunt Resistor Configuration
+ *============================================================================*/
+
+/**
+ * @brief Per-channel shunt resistor configuration
+ *
+ * Encapsulates shunt resistor values for all 3 channels.
+ * Use the builder static methods for common configurations,
+ * or construct directly for custom per-channel values.
+ *
+ * Example:
+ *   // All channels use 5mΩ
+ *   auto cfg = ShuntConfig::all(0.005f);
+ *
+ *   // Mixed: CH1=10mΩ, CH2=5mΩ, CH3=5mΩ
+ *   ShuntConfig cfg{0.01f, 0.005f, 0.005f};
+ */
+struct ShuntConfig {
+    float ch1;  ///< Channel 1 shunt resistance (ohms)
+    float ch2;  ///< Channel 2 shunt resistance (ohms)
+    float ch3;  ///< Channel 3 shunt resistance (ohms)
+
+    /// All channels use the same shunt value
+    static constexpr ShuntConfig all(float ohm) {
+        return {ohm, ohm, ohm};
+    }
+
+    /// Default: all channels 0.1Ω (100mΩ)
+    static constexpr ShuntConfig defaults() {
+        return all(INA3221Config::DEFAULT_SHUNT_OHM);
+    }
+
+    /// Get shunt value for channel (1-3), returns 0 on invalid channel
+    float get(uint8_t channel) const {
+        switch (channel) {
+            case 1: return ch1;
+            case 2: return ch2;
+            case 3: return ch3;
+            default: return 0.0f;
+        }
+    }
+};
+
+/*============================================================================
  * Direction Enumeration
  *============================================================================*/
 
@@ -116,13 +159,14 @@ public:
     INA3221() = default;
 
     /**
-     * @brief Initialize with I2C handle and device address
+     * @brief Initialize with I2C handle, device address, and shunt configuration
      * @param hi2c Pointer to HAL I2C handle
      * @param addr 7-bit I2C device address (default 0x40 for A0=GND)
-     * @param shuntOhm Shunt resistor value in ohms (default 0.1)
+     * @param shuntCfg Per-channel shunt resistor configuration (default 0.1Ω all)
      * @return true = device found and initialized
      */
-    bool init(I2C_HandleTypeDef* hi2c, uint8_t addr = 0x40, float shuntOhm = INA3221Config::DEFAULT_SHUNT_OHM);
+    bool init(I2C_HandleTypeDef* hi2c, uint8_t addr = 0x40,
+              const ShuntConfig& shuntCfg = ShuntConfig::defaults());
 
     /**
      * @brief Check if device is connected
@@ -170,10 +214,24 @@ public:
     uint16_t readDieId();
 
     /**
-     * @brief Set shunt resistor value for current calculation
+     * @brief Set shunt resistor configuration for all channels
+     * @param shuntCfg Per-channel shunt resistor configuration
+     */
+    void setShuntConfig(const ShuntConfig& shuntCfg) { m_shuntCfg = shuntCfg; }
+
+    /**
+     * @brief Set shunt resistor value for a single channel
+     * @param channel Channel number (1, 2, or 3)
      * @param shuntOhm Shunt value in ohms
      */
-    void setShuntResistor(float shuntOhm) { m_shuntOhm = shuntOhm; }
+    void setShuntResistor(uint8_t channel, float shuntOhm);
+
+    /**
+     * @brief Get shunt resistor value for a channel
+     * @param channel Channel number (1, 2, or 3)
+     * @return Shunt value in ohms, 0 on invalid channel
+     */
+    float getShuntResistor(uint8_t channel) const { return m_shuntCfg.get(channel); }
 
     /**
      * @brief Determine current direction from shunt voltage (static utility)
@@ -233,7 +291,7 @@ public:
 private:
     I2C_HandleTypeDef* m_i2c = nullptr;
     uint8_t m_addr = 0x40;
-    float m_shuntOhm = INA3221Config::DEFAULT_SHUNT_OHM;
+    ShuntConfig m_shuntCfg = ShuntConfig::defaults();
     bool m_reverseDir[3] = {false, false, false};  // per-channel IN+/IN- swap flag
 };
 
@@ -245,7 +303,7 @@ private:
 extern "C" {
 #endif
 
-bool b_INA3221_Init(INA3221* dev, I2C_HandleTypeDef* hi2c, uint8_t addr, float shuntOhm);
+bool b_INA3221_Init(INA3221* dev, I2C_HandleTypeDef* hi2c, uint8_t addr, const ShuntConfig& shuntCfg);
 bool b_INA3221_IsConnected(INA3221* dev);
 uint16_t u16_INA3221_ReadBusVoltage(INA3221* dev, uint8_t channel);
 int16_t s16_INA3221_ReadShuntVoltage(INA3221* dev, uint8_t channel);

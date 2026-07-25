@@ -31,8 +31,8 @@ extern volatile uint8_t led1_blink_enabled;
 
 // INA3221 address: A0=VS => 0x41
 constexpr uint8_t INA3221_ADDR = 0x41;
-// Shunt resistor: 0.01Ω (10mΩ)
-constexpr float SHUNT_RESISTOR = 0.01f;
+// Shunt resistor: 5mΩ per channel (hardware updated)
+constexpr ShuntConfig INA3221_SHUNT = ShuntConfig::all(0.005f);
 
 // Display layout (160x80 LCD)
 namespace Display {
@@ -521,7 +521,7 @@ int main(void)
     eeprom.init(&hi2c1);
 
     // Initialize INA3221
-    if (!ina3221.init(&hi2c1, INA3221_ADDR, SHUNT_RESISTOR))
+    if (!ina3221.init(&hi2c1, INA3221_ADDR, INA3221_SHUNT))
     {
         // INA3221 not found - show error
         lcd.writeString(30, 30, "INA3221 Not Found!", Font_Style1_7x10,
