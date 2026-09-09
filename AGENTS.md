@@ -34,9 +34,16 @@ LoveFinderLib/             # 自定义驱动库 (C++17)
   AT24C04/                 # EEPROM驱动
   BUTTON/                  # 按键驱动 (状态机轮询)
   EEPROM/                  # EEPROM高层封装
+  FontLib/                 # 字库模块 (font_manifest.json 唯一真相源，PickSoul 兼容)
+    font_manifest.json     # 机器可读的真相源 (PickSoul 读写)
+    font.h                 # FontLib 公共接口 (FontDef + 查表声明)
+    font_data.h            # 子集字体 extern 声明
+    font_data.cpp          # 子集字体位图数据 (字符级编译, 全 C++)
+    font_config.hpp        # 字体编译控制 (USE_FONT_SUBSET_*, CHARS 宏)
+    fonts.cpp              # 完整字库 (模式A, 当前无完整字体, 仅占位)
   I2C/                     # I2C扫描驱动
   INA3221/                 # (目录空，TODO)
-  ST7735/                  # LCD驱动 + fonts + icons
+  ST7735/                  # LCD驱动 + icons (无字体文件，字体已迁移到 FontLib)
 ```
 
 ## 关键依赖

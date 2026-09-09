@@ -11,7 +11,7 @@
 #include "gpio.h"
 #include "adc.h"
 
-#include "ST7735.hpp"   // includes fonts.hpp
+#include "ST7735.hpp"   // includes font.h (FontLib)
 #include "I2C.hpp"
 #include "INA3221.hpp"
 #include "BUTTON.hpp"
@@ -42,11 +42,11 @@ namespace Display {
     constexpr uint8_t COL3_X = 96;   // CH3
     constexpr uint8_t COL_W  = 47;   // column width (leaves 1px gap before badge)
 
-    // Row Y positions (all text uses Font_Style2_9x18, 18px height)
-    constexpr uint8_t STATUS_Y    = 0;     // Font_Style2_9x18: CHx (left) + input voltage (right)
-    constexpr uint8_t POWER_Y     = 19;    // Font_Style2_9x18: total power (left) + mAh (right)
-    constexpr uint8_t CURRENT_Y   = 39;    // Font_Style2_9x18: current XX.YY per column
-    constexpr uint8_t POWER_COL_Y = 60;    // Font_Style2_9x18: per-channel power X.X
+    // Row Y positions (all text uses Font_Subset_9x18, 18px height)
+    constexpr uint8_t STATUS_Y    = 0;     // Font_Subset_9x18: input voltage (right)
+    constexpr uint8_t POWER_Y     = 19;    // Font_Subset_9x18: total power (left) + mAh (right)
+    constexpr uint8_t CURRENT_Y   = 39;    // Font_Subset_9x18: current XX.YY per column
+    constexpr uint8_t POWER_COL_Y = 60;    // Font_Subset_9x18: per-channel power X.X
 
     // Unit badge on the right of each row
     constexpr uint8_t BADGE_X   = 143;   // right side of 160px screen
@@ -55,7 +55,7 @@ namespace Display {
 
     // Rounded rect around power row
     constexpr uint8_t POWER_RECT_X = 1;
-    constexpr uint8_t POWER_RECT_Y = 17;    // shifted down for taller Font_Style2_9x18 status row
+    constexpr uint8_t POWER_RECT_Y = 17;    // shifted down for taller Font_Subset_9x18 status row
     constexpr uint8_t POWER_RECT_W = 158;
     constexpr uint8_t POWER_RECT_H = 22;    // 2px padding top/bottom for 18px font
     constexpr uint8_t POWER_RADIUS = 4;
@@ -88,7 +88,7 @@ constexpr uint8_t COL_X[3] = {
     Display::COL3_X
 };
 
-// Per-channel accent colors (for power text, power bar, CHx label)
+// Per-channel accent colors (for power text, power bar)
 constexpr uint16_t CH_COLOR[3] = {
     ST7735_Color::RGB565(0,   200, 255),   // CH1: bright cyan
     ST7735_Color::RGB565(255, 200, 0),     // CH2: amber/gold
@@ -125,7 +125,6 @@ static uint8_t animCounter = 0;
 static uint16_t prevPowerW_x100 = 0xFFFF;       // for dirty detect: W*100
 static uint16_t prevInputVoltage_mV = 0xFFFF;  // for dirty detect
 static uint16_t prevCharge_mAh = 0xFFFF;       // for dirty detect
-static int8_t   prevInputChannel = -2;         // -2 = uninitialized
 
 // Charge accumulation (200ms tick)
 static uint32_t charge_mAs = 0;                // accumulated charge in mAs
@@ -190,7 +189,7 @@ void DisplayInit(void)
 {
     lcd.fillScreen(ST7735_Color::BLACK);
 
-    // Clear status bar area (top 18px for Font_Style2_9x18)
+    // Clear status bar area (top 18px for Font_Subset_9x18)
     lcd.fillRectangleFast(0, Display::STATUS_Y, 160, 18, ST7735_Color::BLACK);
 
     // Draw power rounded rectangle background (static, done once)
@@ -205,7 +204,7 @@ void DisplayInit(void)
     lcd.fillRectangleFast(0, Display::POWER_COL_Y, 160, 18, ST7735_Color::BLACK);
 
     // Draw unit badge backgrounds (static, done once)
-    // Note: badges use Font_Style2_9x18, matching current/power text font
+    // Note: badges use Font_Subset_9x18, matching current/power text font
     fillRoundRect(Display::BADGE_X, Display::CURRENT_Y,
                   Display::BADGE_W, 18,
                   Display::BADGE_R, ST7735_Color::DARK_GRAY);
@@ -213,12 +212,12 @@ void DisplayInit(void)
                   Display::BADGE_W, 18,
                   Display::BADGE_R, ST7735_Color::DARK_GRAY);
 
-    // Write unit labels inside badges (Font_Style2_9x18, matching value font)
+    // Write unit labels inside badges (Font_Subset_9x18, matching value font)
     lcd.writeString(Display::BADGE_X + 3, Display::CURRENT_Y,
-                    "A", Font_Style2_9x18,
+                    "A", Font_Subset_9x18,
                     ST7735_Color::RGB565(100, 200, 255), ST7735_Color::DARK_GRAY);
     lcd.writeString(Display::BADGE_X + 3, Display::POWER_COL_Y,
-                    "W", Font_Style2_9x18,
+                    "W", Font_Subset_9x18,
                     ST7735_Color::RGB565(230, 140, 30), ST7735_Color::DARK_GRAY);
 
     // Draw progress bar backgrounds (static, done once)
@@ -238,7 +237,6 @@ void DisplayInit(void)
     prevPowerW_x100 = 0xFFFF;
     prevInputVoltage_mV = 0xFFFF;
     prevCharge_mAh = 0xFFFF;
-    prevInputChannel = -2;  // force first draw
 
     // Reset charge accumulation
     charge_mAs = 0;
@@ -260,50 +258,47 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
     }
 
     // --- Identify input channel & calculate total power ---
+    // Direction determined from current_mA sign (already includes per-channel reversal correction):
+    //   negative = source feeding the common bus (IN), positive = load drawing from the bus (OUT).
+    // CH1 and CH2 use negative-current detection; CH3 has a dedicated pre-shunt 3.3V jack
+    //   so CH3's shunt reading is unreliable for direction detection — CH3 is identified
+    //   by bus voltage fallback when no source is found on CH1/CH2.
     int inputChannel = -1;   // -1 = no input detected
     uint16_t inputVoltage_mV = 0;
     uint32_t totalW_x10 = 0;
     uint32_t totalW_x100 = 0;
 
-    for (int ch = 0; ch < 3; ch++) {
+    // Check CH1, CH2 for negative current (external source feeding the bus)
+    for (int ch = 0; ch < 2; ch++) {
         const INA3221_ChannelData& chData = data[ch];
 
-        // CH3 forced OUT (3.3V derived from its DC connector, direction unreliable)
-        INA3221_Direction dir;
-        if (ch == 2) {
-            dir = INA3221_Direction::OUT;
-        } else {
-            dir = INA3221::getDirection(chData.shuntVoltage_uV);
-        }
-
-        if (dir == INA3221_Direction::IN) {
-            inputChannel = ch;  // 0=CH1, 1=CH2
+        // Negative current = power source feeding the bus (IN)
+        if (chData.current_mA < 0) {
+            inputChannel = ch;
             inputVoltage_mV = chData.busVoltage_mV;
 
             // power = V * |I| / 1000 (mW)
-            uint32_t abs_mA = (chData.current_mA >= 0)
-                                ? static_cast<uint32_t>(chData.current_mA)
-                                : static_cast<uint32_t>(-chData.current_mA);
+            uint32_t abs_mA = static_cast<uint32_t>(-chData.current_mA);
             totalW_x10 += (static_cast<uint32_t>(chData.busVoltage_mV) * abs_mA) / 100000;
             totalW_x100 += (static_cast<uint32_t>(chData.busVoltage_mV) * abs_mA) / 10000;
         }
     }
 
-    // If no channel detected as IN (all OUT), check CH3 bus voltage
-    // CH3's direction is unreliable but its bus voltage is valid
-    if (inputChannel < 0) {
-        const INA3221_ChannelData& chData = data[2];  // CH3
-        if (chData.busVoltage_mV >= 3000) {            // ≥3V = valid power source
-            inputChannel = 2;                          // CH3
-            inputVoltage_mV = chData.busVoltage_mV;
+    // Fallback: no source detected on CH1/CH2.
+    // CH3's 3.3V board-power jack feeds the bus before CH3's sense resistor,
+    // so CH3's shunt reads ~0 or small unreliable values.
+    // When bus voltage is present (≥3V) the input must be CH3 (board's power jack).
+    if (inputChannel < 0 && data[2].busVoltage_mV >= 3000) {
+        inputChannel = 2;   // CH3
+        inputVoltage_mV = data[2].busVoltage_mV;
 
-            // Calculate CH3 power contribution
-            uint32_t abs_mA = (chData.current_mA >= 0)
-                                ? static_cast<uint32_t>(chData.current_mA)
-                                : static_cast<uint32_t>(-chData.current_mA);
-            totalW_x10 += (static_cast<uint32_t>(chData.busVoltage_mV) * abs_mA) / 100000;
-            totalW_x100 += (static_cast<uint32_t>(chData.busVoltage_mV) * abs_mA) / 10000;
-        }
+        // Add CH3's power contribution (bus voltage is valid, current via its shunt)
+        int32_t ch3_mA = data[2].current_mA;
+        uint32_t abs_mA = (ch3_mA >= 0)
+                            ? static_cast<uint32_t>(ch3_mA)
+                            : static_cast<uint32_t>(-ch3_mA);
+        totalW_x10 += (static_cast<uint32_t>(inputVoltage_mV) * abs_mA) / 100000;
+        totalW_x100 += (static_cast<uint32_t>(inputVoltage_mV) * abs_mA) / 10000;
     }
 
     // Clamp totalW_x10 / x100
@@ -324,38 +319,21 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
         }
     }
 
-    // --- Row 1: Status Bar (Y=0, Font_Style2_9x18) ---
-    // Left: CH1/CH2/CH3 (input source) in the channel's own color
-    if (inputChannel != prevInputChannel) {
-        // Map inputChannel (0=CH1, 1=CH2, 2=CH3) to display column index (2-CH3, 1-CH2, 0-CH1)
-        // so CHx label color matches the column's power text color (CH_COLOR[col])
-        int colIdx = (inputChannel >= 0) ? (2 - inputChannel) : -1;
-        uint16_t chColor = (colIdx >= 0) ? CH_COLOR[colIdx] : ST7735_Color::GRAY;
-        if (inputChannel >= 0) {
-            snprintf(buf, sizeof(buf), "CH%d", inputChannel + 1);
-        } else {
-            snprintf(buf, sizeof(buf), "---");
-        }
-        // Clear old 18px text area to prevent ghosting
-        lcd.fillRectangleFast(0, Display::STATUS_Y, 160, 18, ST7735_Color::BLACK);
-        lcd.writeString(0, Display::STATUS_Y, buf, Font_Style2_9x18,
-                        chColor, ST7735_Color::BLACK);
-        prevInputChannel = static_cast<int8_t>(inputChannel);
-    }
+    // --- Row 1: Status Bar (Y=0) — Input Voltage (right-aligned) ---
 
-    // Right: input voltage XX.YYV (right-aligned with Font_Style2_9x18: 7 chars × 9px = 63px)
+    // Right: input voltage XX.YYV (right-aligned with Font_Subset_9x18: 7 chars × 9px = 63px)
     {
         if (inputVoltage_mV != prevInputVoltage_mV) {
             uint16_t v_int = inputVoltage_mV / 1000;
             uint8_t  v_dec = (inputVoltage_mV % 1000) / 10;
             snprintf(buf, sizeof(buf), "%02u.%02uV", v_int, v_dec);
-            lcd.writeString(106, Display::STATUS_Y, buf, Font_Style2_9x18,
+            lcd.writeString(106, Display::STATUS_Y, buf, Font_Subset_9x18,
                             ST7735_Color::RGB565(180, 220, 100), ST7735_Color::BLACK);
             prevInputVoltage_mV = inputVoltage_mV;
         }
     }
 
-    // --- Row 2: Power + Charge (Font_Style2_9x18 inside rounded rect) ---
+    // --- Row 2: Power + Charge (Font_Subset_9x18 inside rounded rect) ---
     // Always redraw both together (they're close enough to overlap)
     {
         uint16_t w_int  = static_cast<uint16_t>(totalW_x100 / 100);
@@ -365,13 +343,13 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
         if (totalW_x100 != prevPowerW_x100 || mAh != prevCharge_mAh) {
             snprintf(buf, sizeof(buf), "%04u.%02uW", w_int, w_dec);
             lcd.writeString(Display::POWER_RECT_X + 2, Display::POWER_Y,
-                            buf, Font_Style2_9x18,
+                            buf, Font_Subset_9x18,
                             ST7735_Color::WHITE, ST7735_Color::DARK_GRAY);
 
             // Right-align mAh: 8 chars × 9px = 72px
             snprintf(buf, sizeof(buf), "%05umAh", mAh);
             lcd.writeString(Display::POWER_RECT_X + Display::POWER_RECT_W - 72 - 2,
-                            Display::POWER_Y, buf, Font_Style2_9x18,
+                            Display::POWER_Y, buf, Font_Subset_9x18,
                             ST7735_Color::RGB565(100, 200, 255), ST7735_Color::DARK_GRAY);
 
             prevPowerW_x100 = static_cast<uint16_t>(totalW_x100);
@@ -387,22 +365,15 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
         const uint16_t v_mV = ch.busVoltage_mV;
         const int32_t  i_mA = ch.current_mA;
 
-        // CH3 forced OUT, CH1/CH2 use normal detection
-        const int chIdx = 2 - i;  // actual channel index (0=CH1, 1=CH2, 2=CH3)
-        INA3221_Direction dir;
-        if (chIdx == 2) {
-            dir = INA3221_Direction::OUT;
-        } else {
-            dir = INA3221::getDirection(ch.shuntVoltage_uV);
-        }
-        const bool isIn = (dir == INA3221_Direction::IN);
+        // Direction from current_mA sign (includes per-channel reversal correction)
+        const bool isIn = (i_mA < 0);   // negative current = source feeding bus (IN)
 
         // Pre-calc power for this channel: V * |I| / 100000 → W*10
         uint32_t abs_mA = (i_mA >= 0) ? static_cast<uint32_t>(i_mA) : static_cast<uint32_t>(-i_mA);
         uint16_t power_x10 = static_cast<uint16_t>((static_cast<uint32_t>(v_mV) * abs_mA) / 100000);
         if (power_x10 > 999) power_x10 = 999;  // clamp to 99.9W
 
-        // --- Current (Font_Style2_9x18, left-aligned with A unit) ---
+        // --- Current (Font_Subset_9x18, left-aligned with A unit) ---
         if (i_mA != prevCurrent_mA[i] || isIn != prevIsIn[i])
         {
             uint32_t abs_mA2 = abs_mA;
@@ -415,7 +386,7 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
             uint16_t cColor = CH_COLOR_DIM[i];
 
             lcd.writeString(colX, Display::CURRENT_Y,
-                            buf, Font_Style2_9x18,
+                            buf, Font_Subset_9x18,
                             cColor, ST7735_Color::BLACK);
 
             prevCurrent_mA[i] = i_mA;
@@ -445,7 +416,7 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
             }
         }
 
-        // --- Per-Channel Power (Font_Style2_9x18, %03u.%u, color per channel) ---
+        // --- Per-Channel Power (Font_Subset_9x18, %03u.%u, color per channel) ---
         if (power_x10 != prevPower_x10[i])
         {
             uint8_t p_int = static_cast<uint8_t>(power_x10 / 10);
@@ -457,7 +428,7 @@ void UpdateDisplay(const INA3221_ChannelData data[3])
                                   Display::COL_W, 18, ST7735_Color::BLACK);
 
             lcd.writeString(colX, Display::POWER_COL_Y,
-                            buf, Font_Style2_9x18,
+                            buf, Font_Subset_9x18,
                             CH_COLOR[i], ST7735_Color::BLACK);
 
             prevPower_x10[i] = power_x10;
@@ -512,7 +483,7 @@ int main(void)
     lcd.fillScreen(ST7735_Color::BLACK);
 
     // ── Splash screen: show "你好" ─────────────────────────────────
-    lcd.writeStringChineseDMA(48, 24, "\xE4\xBD\xA0\xE5\xA5\xBD", Font_Style3_ZH_16x16,
+    lcd.writeStringChineseDMA(48, 24, "\xE4\xBD\xA0\xE5\xA5\xBD", Font_Subset_ZH_16x16,
                               ST7735_Color::GREEN, ST7735_Color::BLACK);
     HAL_Delay(1500);
     lcd.fillScreen(ST7735_Color::BLACK);
@@ -524,7 +495,7 @@ int main(void)
     if (!ina3221.init(&hi2c1, INA3221_ADDR, INA3221_SHUNT))
     {
         // INA3221 not found - show error
-        lcd.writeString(30, 30, "INA3221 Not Found!", Font_Style1_7x10,
+        lcd.writeString(30, 30, "INA3221 Not Found!", Font_Subset_7x10,
                         ST7735_Color::RED, ST7735_Color::BLACK);
         while (1) { HAL_Delay(1000); }
     }
@@ -569,7 +540,7 @@ while (1)
         {
             // I2C re-scan placeholder - show device list briefly
             lcd.fillScreen(ST7735_Color::BLACK);
-            lcd.writeString(30, 0, "I2C Devices", Font_Style1_7x10,
+            lcd.writeString(30, 0, "I2C Devices", Font_Subset_7x10,
                             ST7735_Color::CYAN, ST7735_Color::BLACK);
 
             uint8_t devices[16];
@@ -578,7 +549,7 @@ while (1)
             for (uint8_t j = 0; j < count; j++)
             {
                 snprintf(mainBuf, sizeof(mainBuf), "0x%02X", devices[j]);
-                lcd.writeString(5, y, mainBuf, Font_Style1_7x10,
+                lcd.writeString(5, y, mainBuf, Font_Subset_7x10,
                                 ST7735_Color::WHITE, ST7735_Color::BLACK);
                 y += 12;
             }

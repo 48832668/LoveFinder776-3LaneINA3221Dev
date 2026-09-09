@@ -91,6 +91,7 @@ uint16_t INA3221::readBusVoltage(uint8_t channel)
         return 0;
 
     uint16_t raw = (static_cast<uint16_t>(buf[0]) << 8) | buf[1];
+    // Bus voltage: bits [14:3] valid data, LSB = 8 mV, bits [2:0] not used
     return (raw >> 3) * 8;
 }
 
@@ -111,7 +112,9 @@ int16_t INA3221::readShuntVoltage(uint8_t channel)
         return 0;
 
     uint16_t raw = (static_cast<uint16_t>(buf[0]) << 8) | buf[1];
-    int16_t shunt_uV = (static_cast<int16_t>(raw) >> 3) * 40;
+    // Shunt voltage: 15-bit twos complement, LSB = 40 μV per INA3221 datasheet.
+    // All 15 bits are valid data; no extra low bits to discard.
+    int16_t shunt_uV = static_cast<int16_t>(raw) * 40;
 
     return shunt_uV;
 }
