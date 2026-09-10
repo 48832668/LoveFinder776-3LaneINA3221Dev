@@ -142,9 +142,9 @@ enum class INA3221_Direction : int8_t {
  *============================================================================*/
 
 struct INA3221_ChannelData {
-    int16_t shuntVoltage_uV;   // Shunt voltage in microvolts (signed)
+    int32_t shuntVoltage_uV;    // Shunt voltage in microvolts (signed, raw, no reversal)
     uint16_t busVoltage_mV;     // Bus voltage in millivolts
-    int32_t current_mA;         // Current in milliamps (signed, calculated from shunt)
+    int32_t current_mA;         // Current in milliamps (signed, reversal-corrected)
 };
 
 /*============================================================================
@@ -186,7 +186,7 @@ public:
      * @param channel Channel number (1, 2, or 3)
      * @return Shunt voltage in microvolts (signed), 0 on error
      */
-    int16_t readShuntVoltage(uint8_t channel);
+    int32_t readShuntVoltage(uint8_t channel);
 
     /**
      * @brief Read all data for a channel
@@ -243,7 +243,7 @@ public:
      *   positive → Shunt+ > Shunt- → current flows OUT to load
      *   negative → Shunt+ < Shunt- → current flows IN from source
      */
-    static INA3221_Direction getDirection(int16_t shuntVoltage_uV)
+    static INA3221_Direction getDirection(int32_t shuntVoltage_uV)
     {
         return (shuntVoltage_uV >= 0) ? INA3221_Direction::OUT : INA3221_Direction::IN;
     }
@@ -252,6 +252,10 @@ public:
      * @brief Read shunt voltage for a channel and determine direction
      * @param channel Channel number (1, 2, or 3)
      * @return Direction enum (OUT or IN), corrected for per-channel reversal
+     *
+     * Applies the IN+/IN- reversal flag (setChannelDirectionReversed)
+     * before evaluating direction, so the result always reflects the
+     * physical current flow regardless of PCB pin swapping.
      */
     INA3221_Direction getChannelDirection(uint8_t channel);
 
@@ -306,7 +310,7 @@ extern "C" {
 bool b_INA3221_Init(INA3221* dev, I2C_HandleTypeDef* hi2c, uint8_t addr, const ShuntConfig& shuntCfg);
 bool b_INA3221_IsConnected(INA3221* dev);
 uint16_t u16_INA3221_ReadBusVoltage(INA3221* dev, uint8_t channel);
-int16_t s16_INA3221_ReadShuntVoltage(INA3221* dev, uint8_t channel);
+int32_t s32_INA3221_ReadShuntVoltage(INA3221* dev, uint8_t channel);
 void v_INA3221_ReadAllChannels(INA3221* dev, INA3221_ChannelData data[3]);
 INA3221_Direction e_INA3221_GetChannelDirection(INA3221* dev, uint8_t channel);
 

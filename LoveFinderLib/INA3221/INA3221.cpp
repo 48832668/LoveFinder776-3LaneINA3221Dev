@@ -66,7 +66,11 @@ bool INA3221::setConfig(uint16_t config)
     if (HAL_I2C_Master_Transmit(m_i2c, m_addr << 1, buf, 1, 100) != HAL_OK) return false;
     if (HAL_I2C_Master_Receive(m_i2c, m_addr << 1, cfg, 2, 100) != HAL_OK) return false;
 
-    return true;
+    uint16_t readback = (static_cast<uint16_t>(cfg[0]) << 8) | cfg[1];
+    // Compare the readback to the value we wrote (mask off the RESET bit which
+    // self-clears after a software reset)
+    const uint16_t COMPARE_MASK = ~INA3221Config::CFG_RESET;
+    return (readback & COMPARE_MASK) == (config & COMPARE_MASK);
 }
 
 bool INA3221::isConnected()
@@ -95,7 +99,7 @@ uint16_t INA3221::readBusVoltage(uint8_t channel)
     return (raw >> 3) * 8;
 }
 
-int16_t INA3221::readShuntVoltage(uint8_t channel)
+int32_t INA3221::readShuntVoltage(uint8_t channel)
 {
     if (m_i2c == nullptr) return 0;
     if (channel < 1 || channel > 3) return 0;
@@ -112,9 +116,10 @@ int16_t INA3221::readShuntVoltage(uint8_t channel)
         return 0;
 
     uint16_t raw = (static_cast<uint16_t>(buf[0]) << 8) | buf[1];
-    // Shunt voltage: 15-bit twos complement, LSB = 40 μV per INA3221 datasheet.
-    // All 15 bits are valid data; no extra low bits to discard.
-    int16_t shunt_uV = static_cast<int16_t>(raw) * 40;
+    // INA3221 shunt voltage register: 12-bit signed data left-justified in
+    // bits [14:3]; bits [2:0] unused (reads as 0). LSB = 40 µV.
+    // sign_extend(reg >> 3, 12) gives the 12-bit signed value in µV*40 units.
+    int32_t shunt_uV = (static_cast<int32_t>(static_cast<int16_t>(raw)) >> 3) * 40;
 
     return shunt_uV;
 }
@@ -139,7 +144,7 @@ INA3221_ChannelData INA3221::readChannel(uint8_t channel)
     data.shuntVoltage_uV = readShuntVoltage(channel);
 
     // Apply per-channel IN+/IN- swap correction for current calculation only
-    int16_t correctedShunt = data.shuntVoltage_uV;
+    int32_t correctedShunt = data.shuntVoltage_uV;
     if (m_reverseDir[channel - 1]) {
         correctedShunt = -correctedShunt;
     }
@@ -179,7 +184,12 @@ bool INA3221::isChannelDirectionReversed(uint8_t channel) const
 
 INA3221_Direction INA3221::getChannelDirection(uint8_t channel)
 {
-    int16_t shunt = readShuntVoltage(channel);
+    if (channel < 1 || channel > 3) return INA3221_Direction::OUT;
+    int32_t shunt = readShuntVoltage(channel);
+    // Apply per-channel IN+/IN- swap correction (same as readChannel)
+    if (m_reverseDir[channel - 1]) {
+        shunt = -shunt;
+    }
     return getDirection(shunt);
 }
 
@@ -231,7 +241,7 @@ uint16_t u16_INA3221_ReadBusVoltage(INA3221* dev, uint8_t channel)
     return dev->readBusVoltage(channel);
 }
 
-int16_t s16_INA3221_ReadShuntVoltage(INA3221* dev, uint8_t channel)
+int32_t s32_INA3221_ReadShuntVoltage(INA3221* dev, uint8_t channel)
 {
     return dev->readShuntVoltage(channel);
 }
