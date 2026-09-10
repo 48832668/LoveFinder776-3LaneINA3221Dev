@@ -158,28 +158,4 @@ private:
     // Get I2C address based on address
     uint8_t getDeviceAddr(uint16_t addr);
 };
-
-/*============================================================================
- * C API Compatibility
- *=======================================================================*/
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-bool b_AT24C04_Init(AT24C04* eeprom, I2C_HandleTypeDef* hi2c);
-bool b_AT24C04_IsConnected(AT24C04* eeprom);
-bool b_AT24C04_Read(AT24C04* eeprom, uint16_t addr, uint8_t* data, uint16_t len);
-bool b_AT24C04_Write(AT24C04* eeprom, uint16_t addr, const uint8_t* data, uint16_t len);
-bool b_AT24C04_Read8(AT24C04* eeprom, uint16_t addr, uint8_t* value);
-bool b_AT24C04_Write8(AT24C04* eeprom, uint16_t addr, uint8_t value);
-bool b_AT24C04_Read16(AT24C04* eeprom, uint16_t addr, uint16_t* value);
-bool b_AT24C04_Write16(AT24C04* eeprom, uint16_t addr, uint16_t value);
-bool b_AT24C04_ReadString(AT24C04* eeprom, uint16_t addr, char* str, uint16_t maxLen);
-bool b_AT24C04_WriteString(AT24C04* eeprom, uint16_t addr, const char* str);
-
-#ifdef __cplusplus
-}
-#endif
-
 #endif // AT24C04_HPP

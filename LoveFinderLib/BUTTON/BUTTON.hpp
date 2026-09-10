@@ -36,14 +36,6 @@ enum class e_BUTTON_Event : uint8_t {
     RELEASE     = 5    // 释放
 };
 
-// 向后兼容
-#define e_BUTTON_EVENT_NONE        e_BUTTON_Event::NONE
-#define e_BUTTON_EVENT_CLICK       e_BUTTON_Event::CLICK
-#define e_BUTTON_EVENT_DOUBLE_CLICK e_BUTTON_Event::DOUBLE_CLICK
-#define e_BUTTON_EVENT_LONG_PRESS  e_BUTTON_Event::LONG_PRESS
-#define e_BUTTON_EVENT_PRESS_DOWN  e_BUTTON_Event::PRESS_DOWN
-#define e_BUTTON_EVENT_RELEASE     e_BUTTON_Event::RELEASE
-
 /*============================================================================
  * 按键状态枚举 (enum class) - 轮询模式
  *============================================================================*/
@@ -77,8 +69,6 @@ struct BUTTON_Config {
     }
 };
 
-// 向后兼容
-using BUTTON_Config = BUTTON_Config;
 
 /*============================================================================
  * 按键计数器结构体
@@ -90,8 +80,6 @@ struct BUTTON_Counter {
     uint16_t longPressCount;   // 长按次数
 };
 
-// 向后兼容
-using BUTTON_Counter = BUTTON_Counter;
 
 /*============================================================================
  * 按键类
@@ -174,29 +162,6 @@ private:
     volatile e_BUTTON_Event m_lastEvent = e_BUTTON_Event::NONE;
     volatile bool m_hasEvent = false;
 };
-
-// 向后兼容的typedef
-using BUTTON = Button;
-
-/*============================================================================
- * C API 兼容层 (extern "C")
- *============================================================================*/
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-BUTTON_Config BUTTON_GetDefaultConfig(void);
-e_BUTTON_Event e_BUTTON_Update(BUTTON* btn);
-bool b_BUTTON_HasEvent(BUTTON* btn);
-e_BUTTON_Event e_BUTTON_GetEvent(BUTTON* btn);
-const BUTTON_Counter* p_BUTTON_GetCounter(BUTTON* btn);
-void v_BUTTON_ResetCounter(BUTTON* btn);
-bool b_BUTTON_IsPressed(BUTTON* btn);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // BUTTON_HPP
 

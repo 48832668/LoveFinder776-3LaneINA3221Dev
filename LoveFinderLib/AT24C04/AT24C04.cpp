@@ -41,17 +41,11 @@ bool AT24C04::writePage(uint8_t devAddr, uint8_t pageAddr, const uint8_t* data, 
     // Limit to 16 bytes per page
     if (len > 16) len = 16;
 
-    // Build buffer: [address, data0, data1, ...]
-    uint8_t buf[17];
-    buf[0] = pageAddr;
-    for (uint8_t i = 0; i < len; i++) {
-        buf[i + 1] = data[i];
-    }
-
-    // Write via I2C C API
-    if (e_I2C_WriteRegs(m_i2c->getHandle(), devAddr, pageAddr, data, len) != e_I2C_Status::OK) {
+    // Write via I2C class (C++ API)
+    if (m_i2c->writeRegs(devAddr, pageAddr, data, len) != e_I2C_Status::OK) {
         return false;
     }
+
 
     // Wait for write completion
     HAL_Delay(AT24C04Config::WRITE_CYCLE_MS);
@@ -240,61 +234,3 @@ bool AT24C04::writeString(uint16_t addr, const char* str)
     }
     return write(addr, reinterpret_cast<const uint8_t*>(str), len);
 }
-
-/*============================================================================
- * C API Implementation
- *============================================================================*/
-
-extern "C" {
-
-bool b_AT24C04_Init(AT24C04* eeprom, I2C_HandleTypeDef* hi2c)
-{
-    return eeprom->init(hi2c);
-}
-
-bool b_AT24C04_IsConnected(AT24C04* eeprom)
-{
-    return eeprom->isConnected();
-}
-
-bool b_AT24C04_Read(AT24C04* eeprom, uint16_t addr, uint8_t* data, uint16_t len)
-{
-    return eeprom->read(addr, data, len);
-}
-
-bool b_AT24C04_Write(AT24C04* eeprom, uint16_t addr, const uint8_t* data, uint16_t len)
-{
-    return eeprom->write(addr, data, len);
-}
-
-bool b_AT24C04_Read8(AT24C04* eeprom, uint16_t addr, uint8_t* value)
-{
-    return eeprom->read8(addr, *value);
-}
-
-bool b_AT24C04_Write8(AT24C04* eeprom, uint16_t addr, uint8_t value)
-{
-    return eeprom->write8(addr, value);
-}
-
-bool b_AT24C04_Read16(AT24C04* eeprom, uint16_t addr, uint16_t* value)
-{
-    return eeprom->read16(addr, *value);
-}
-
-bool b_AT24C04_Write16(AT24C04* eeprom, uint16_t addr, uint16_t value)
-{
-    return eeprom->write16(addr, value);
-}
-
-bool b_AT24C04_ReadString(AT24C04* eeprom, uint16_t addr, char* str, uint16_t maxLen)
-{
-    return eeprom->readString(addr, str, maxLen);
-}
-
-bool b_AT24C04_WriteString(AT24C04* eeprom, uint16_t addr, const char* str)
-{
-    return eeprom->writeString(addr, str);
-}
-
-} // extern "C"

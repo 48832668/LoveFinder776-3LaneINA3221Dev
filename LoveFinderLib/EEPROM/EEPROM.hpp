@@ -163,7 +163,4 @@ private:
     bool waitReady();
 };
 
-//向后兼容
-using EEPROM_Driver = EEPROM;
-
 #endif // EEPROM_HPP

@@ -27,16 +27,4 @@ typedef enum {
 
 /* 外部图标声明 */
 extern IconDef Icons[ICON_COUNT];
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/* 图标绘制函数 */
-void ST7735_DrawIcon(uint16_t x, uint16_t y, IconIndex icon);
-
-#ifdef __cplusplus
-}
-#endif
-
 #endif /* __ICONS_H__ */

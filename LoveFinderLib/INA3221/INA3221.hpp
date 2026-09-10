@@ -298,26 +298,6 @@ private:
     ShuntConfig m_shuntCfg = ShuntConfig::defaults();
     bool m_reverseDir[3] = {false, false, false};  // per-channel IN+/IN- swap flag
 };
-
-/*============================================================================
- * C API Compatibility Layer
- *============================================================================*/
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-bool b_INA3221_Init(INA3221* dev, I2C_HandleTypeDef* hi2c, uint8_t addr, const ShuntConfig& shuntCfg);
-bool b_INA3221_IsConnected(INA3221* dev);
-uint16_t u16_INA3221_ReadBusVoltage(INA3221* dev, uint8_t channel);
-int32_t s32_INA3221_ReadShuntVoltage(INA3221* dev, uint8_t channel);
-void v_INA3221_ReadAllChannels(INA3221* dev, INA3221_ChannelData data[3]);
-INA3221_Direction e_INA3221_GetChannelDirection(INA3221* dev, uint8_t channel);
-
-#ifdef __cplusplus
-}
-#endif
-
 #endif // __cplusplus
 
 #endif // INA3221_HPP

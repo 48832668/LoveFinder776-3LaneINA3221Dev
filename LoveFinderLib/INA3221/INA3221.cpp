@@ -69,7 +69,7 @@ bool INA3221::setConfig(uint16_t config)
     uint16_t readback = (static_cast<uint16_t>(cfg[0]) << 8) | cfg[1];
     // Compare the readback to the value we wrote (mask off the RESET bit which
     // self-clears after a software reset)
-    const uint16_t COMPARE_MASK = ~INA3221Config::CFG_RESET;
+    const uint16_t COMPARE_MASK = static_cast<uint16_t>(~INA3221Config::CFG_RESET);
     return (readback & COMPARE_MASK) == (config & COMPARE_MASK);
 }
 
@@ -219,41 +219,3 @@ uint16_t INA3221::readDieId()
     if (HAL_I2C_Master_Receive(m_i2c, m_addr << 1, buf, 2, 100) != HAL_OK) return 0;
     return (static_cast<uint16_t>(buf[0]) << 8) | buf[1];
 }
-
-/*============================================================================
- * C API Implementation
- *============================================================================*/
-
-extern "C" {
-
-bool b_INA3221_Init(INA3221* dev, I2C_HandleTypeDef* hi2c, uint8_t addr, const ShuntConfig& shuntCfg)
-{
-    return dev->init(hi2c, addr, shuntCfg);
-}
-
-bool b_INA3221_IsConnected(INA3221* dev)
-{
-    return dev->isConnected();
-}
-
-uint16_t u16_INA3221_ReadBusVoltage(INA3221* dev, uint8_t channel)
-{
-    return dev->readBusVoltage(channel);
-}
-
-int32_t s32_INA3221_ReadShuntVoltage(INA3221* dev, uint8_t channel)
-{
-    return dev->readShuntVoltage(channel);
-}
-
-void v_INA3221_ReadAllChannels(INA3221* dev, INA3221_ChannelData data[3])
-{
-    dev->readAllChannels(data);
-}
-
-INA3221_Direction e_INA3221_GetChannelDirection(INA3221* dev, uint8_t channel)
-{
-    return dev->getChannelDirection(channel);
-}
-
-} // extern "C"

@@ -285,28 +285,4 @@ private:
     std::array<ST7735*, MAX_DISPLAYS> m_displays = {};
     size_t m_count = 0;
 };
-
-/*============================================================================
- * C API Compatibility Layer
- *============================================================================*/
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-void v_ST7735_Init(ST7735* dev, SPI_HandleTypeDef* spi,
-                   GPIO_TypeDef* cs_port, uint16_t cs_pin,
-                   GPIO_TypeDef* dc_port, uint16_t dc_pin,
-                   GPIO_TypeDef* reset_port, uint16_t reset_pin,
-                   GPIO_TypeDef* en_port, uint16_t en_pin);
-void v_ST7735_Begin(ST7735* dev);
-void v_ST7735_FillScreen(ST7735* dev, uint16_t color);
-void v_ST7735_FillScreenDMA(ST7735* dev, uint16_t color);
-void v_ST7735_WriteString(ST7735* dev, uint16_t x, uint16_t y, const char* str,
-                          const FontDef* font, uint16_t color, uint16_t bgcolor);
-
-#ifdef __cplusplus
-}
-#endif
-
 #endif // ST7735_HPP

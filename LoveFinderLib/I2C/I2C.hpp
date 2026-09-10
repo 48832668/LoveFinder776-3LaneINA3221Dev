@@ -29,12 +29,6 @@ enum class e_I2C_Status : uint8_t {
 };
 
 // Backward compatibility
-#define I2C_OK     e_I2C_Status::OK
-#define I2C_ERROR  e_I2C_Status::ERROR
-#define I2C_BUSY   e_I2C_Status::BUSY
-#define I2C_TIMEOUT e_I2C_Status::TIMEOUT
-#define I2C_NAK    e_I2C_Status::NAK
-
 /*============================================================================
  * I2C Driver Class
  *============================================================================*/
@@ -165,59 +159,6 @@ private:
     // Internal timeout in milliseconds
     static constexpr uint32_t TIMEOUT_MS = 1000;
 };
-
-/*============================================================================
- * C API Compatibility Layer (extern "C")
- *============================================================================*/
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/**
- * @brief Write single byte (C API)
- */
-e_I2C_Status e_I2C_WriteReg(I2C_HandleTypeDef* hi2c, uint8_t devAddr, uint8_t regAddr, uint8_t data);
-
-/**
- * @brief Read single byte (C API)
- */
-e_I2C_Status e_I2C_ReadReg(I2C_HandleTypeDef* hi2c, uint8_t devAddr, uint8_t regAddr, uint8_t* data);
-
-/**
- * @brief Write word (16-bit) (C API)
- */
-e_I2C_Status e_I2C_WriteReg16(I2C_HandleTypeDef* hi2c, uint8_t devAddr, uint8_t regAddr, uint16_t data);
-
-/**
- * @brief Read word (16-bit) (C API)
- */
-e_I2C_Status e_I2C_ReadReg16(I2C_HandleTypeDef* hi2c, uint8_t devAddr, uint8_t regAddr, uint16_t* data);
-
-/**
- * @brief Write multiple bytes (C API)
- */
-e_I2C_Status e_I2C_WriteRegs(I2C_HandleTypeDef* hi2c, uint8_t devAddr, uint8_t regAddr, const uint8_t* data, size_t len);
-
-/**
- * @brief Read multiple bytes (C API)
- */
-e_I2C_Status e_I2C_ReadRegs(I2C_HandleTypeDef* hi2c, uint8_t devAddr, uint8_t regAddr, uint8_t* data, size_t len);
-
-/**
- * @brief Scan I2C bus (C API)
- */
-uint8_t e_I2C_Scan(I2C_HandleTypeDef* hi2c, uint8_t* devices, uint8_t maxCount);
-
-/**
- * @brief Check device ready (C API)
- */
-bool b_I2C_IsDeviceReady(I2C_HandleTypeDef* hi2c, uint8_t devAddr);
-
-#ifdef __cplusplus
-}
-#endif
-
 #endif // __cplusplus
 
 #endif // I2C_HPP
