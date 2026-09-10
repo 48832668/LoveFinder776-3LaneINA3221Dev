@@ -82,4 +82,4 @@ UV4.exe -b MDK-ARM/LoveFinder776-3LaneINA3221Dev.uvprojx -j0
 
 ## 开源
 
-软件项目开源在 GitHub。
+软件项目开源在 GitHub：[LoveFinder776-3LaneINA3221Dev](https://github.com/48832668/LoveFinder776-3LaneINA3221Dev)
